@@ -430,12 +430,13 @@ export class Room {
     }
   }
 
-  // Tiếng động của một trạm: hợp lệ (đúng giờ, đúng việc) thì nhỏ hơn, lén lút/ban đêm thì to hơn.
+  // Tiếng động của một trạm: làm việc hợp lệ (đúng giờ, đúng việc, ban ngày) thì KHÔNG thu hút quản giáo (chỉ phát âm thanh),
+  // nên quản giáo không chạy tới/báo động khi người chơi đang làm đúng việc. Lén lút hoặc ban đêm thì gây tiếng động như cũ.
   stationNoise(p, s) {
     if (!s.snd) return;
     const night = this.phase === NIGHT_PHASE;
     const legit = s.phases && s.phases.includes(this.phase) && !night && s.kind !== 'item' && s.kind !== 'dig';
-    const R = (s.nr || 0) * (legit ? 0.45 : 1) * (night ? 1.25 : 1);
+    const R = legit ? 0 : (s.nr || 0) * (night ? 1.25 : 1);
     this.noise(p.x, p.z, R, s.snd);
   }
 

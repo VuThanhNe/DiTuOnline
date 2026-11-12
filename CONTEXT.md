@@ -110,6 +110,8 @@ Game giả lập đời sống trại giam, 3D, nhiều người chơi realtime,
 - **Sau review code:** `autoQuality` bỏ qua 5 giây đầu sau khi vào game và nhận ra màn hình bị giới hạn ~30 Hz (không hạ chất lượng oan); bỏ biến thừa `fpsAcc/fpsN`.
 - Còn lại: M4, N4, N6, S2 (phần còn lại), S3, C2, C5, L2 (cần ffmpeg), L4, R3, R4. Lộ trình: `ROADMAP.md`.
 
+**Sửa lỗi (2026-11-12):** quản giáo lao tới và hiện ❗ khi người chơi đang làm việc đúng giờ ban ngày. Nguyên nhân: `stationNoise` vẫn gây tiếng động (45% bán kính) cho việc hợp lệ. Nay làm việc hợp lệ ban ngày không thu hút quản giáo (bán kính 0, vẫn phát âm thanh); lén lút (đào, hàng rào, trộm kho, làm sai giờ) và ban đêm vẫn gây tiếng động như cũ. Tiếng chạy/tăng lực (`runNoise`) và bom không đổi.
+
 ## Đợt 4: sửa lỗi + mở rộng
 **Bản đồ mở rộng** (`WORLD` -40..64 x -30..48): khu đông có Phòng y tế (khám, giường bệnh hồi máu), Phòng giặt, Vườn rau; dãy nam có Phòng giải trí (bóng bàn, chơi bài, tivi), Phòng gym, Phòng tắm. Sân tập có khung thành, tường gạch, vòng bắn bi (trạm đá bóng, đập gạch, bắn bi, hít đất, kéo xà, tập thể dục). Giặt/vườn là kind `chore` (tính ca lao động); tivi/tắm/khám là kind `rest` (giữ E, hồi máu/sức); `play` là bóng bàn/chơi bài. Mỗi trạm/tuyến tuần tra/điểm mèo phải nằm trên chỗ trống (kiểm tra bằng `blocked`/`distField`).
 **Mèo cathehe:** NPC `kind: 'cat'` (`CAT`, `CAT_SPOTS`), tự đi giữa các điểm bằng `walkGuard`, ngồi nghỉ khi `wait > 0` (cờ snapshot = 2), kêu meo (`NPC_LINES.cat`, sfx `meow`).
