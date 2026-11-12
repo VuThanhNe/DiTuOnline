@@ -50,7 +50,7 @@ Nhạc nền: `public/music/day.mp3` (ban ngày) và `public/music/night.mp3` (g
 - Đồ họa mặc định **Tự động**: tự hạ/nâng chất lượng theo FPS lúc đang chơi (tắt bloom, bóng nhỏ hơn, giảm độ phân giải, tắt bóng). Có thể chọn mức cố định trong menu Esc.
 - Phím **F3** hiện bảng chẩn đoán (FPS, ping, số lần bị sửa vị trí, số lệnh vẽ). Thêm `?lag=120&jitter=30` vào địa chỉ để giả lập mạng trễ khi thử trên máy cá nhân.
 - `GET /status` có thêm `tickAvgMs`, `tickMaxMs`, `loopLagMs`, `loopLagMaxMs` (số đo nhịp server). File văn bản được nén brotli/gzip.
-- Danh sách việc tối ưu đã làm và còn lại: [OPTIMIZE_PLAN.md](OPTIMIZE_PLAN.md); lộ trình phát triển: [ROADMAP.md](ROADMAP.md).
+- Danh sách việc tối ưu đã làm và còn lại: [OPTIMIZE_PLAN.md](OPTIMIZE_PLAN.md); lộ trình phát triển: [ROADMAP.md](ROADMAP.md); phương án cải tổ gameplay: [REDESIGN_PLAN.md](REDESIGN_PLAN.md).
 
 ## Cấu trúc
 

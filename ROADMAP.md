@@ -28,7 +28,7 @@ C5 (bóng cập nhật 30 lần/giây, bớt đèn điểm), S3 (cache tìm đư
 
 ## Giai đoạn 4 — Nội dung và độ tin cậy của game
 
-Các việc dưới đây thuộc về gameplay, chưa nằm trong kế hoạch tối ưu; làm sau khi mạng ổn định.
+**Phương án cải tổ chi tiết (minigame khó hơn, hợp đồng, nhiều đường vượt ngục, ván có kết thúc...): xem [REDESIGN_PLAN.md](REDESIGN_PLAN.md).** Các việc dưới đây thuộc về gameplay, chưa nằm trong kế hoạch tối ưu; làm sau khi mạng ổn định.
 
 | Việc | Lý do | Công |
 |---|---|---|
