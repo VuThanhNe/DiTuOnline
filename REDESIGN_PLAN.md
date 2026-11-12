@@ -1,6 +1,8 @@
 # Phương án cải tổ gameplay: bớt nhàm, minigame khó và đáng chơi hơn, vòng lặp vui hơn
 
-Cập nhật 2026-11-12. Đây là **bản thiết kế + kế hoạch làm**, chưa code. Phản hồi của người chơi: "hơi nhàm, minigame quá dễ, logic game chưa đủ vui".
+Cập nhật 2026-11-12. **Trạng thái: giai đoạn 0 (số đo `[minigame]`), giai đoạn 1 (A1, A2, A4, A5) và phần của giai đoạn 2 (A3 cược, B1 hợp đồng, B2 mức nóng) ĐÃ LÀM** (chi tiết: `CONTEXT.md` Đợt 11, test `npm run test:mg`). Còn lại: A6, A7, B3–B8 (một phần), cấu trúc ván và tiến trình (mục 5), cần chủ dự án trả lời mục 9 và chơi thử để cân bằng.
+
+Bản thiết kế gốc: Phản hồi của người chơi: "hơi nhàm, minigame quá dễ, logic game chưa đủ vui".
 
 ## 1. Chẩn đoán (từ mã nguồn hiện tại)
 

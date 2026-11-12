@@ -437,13 +437,32 @@ function onMsg(m) {
       break;
     case 'bomb': addBomb(m.id, m.x, m.z, m.fuse, m.ox, m.oz); break;
     case 'boom': explode(m.id, m.x, m.z); break;
-    case 'mg': openMinigame(m); break;
+    case 'mg': hideBet(); openMinigame(m); break;
+    case 'bet': showBet(m); break;
     case 'hilores': minigameEvent(m); break; // kết quả ván bài lớn/nhỏ do server quyết định
     case 'mgx': forceCloseMinigame(); break;
     case 'shop': openShop(); break;
     case 'event': toast(m.e === 'rain' ? '🌧️ Trời mưa.' : m.e === 'blackout' ? '🔦 Cúp điện!' : '🚨 Khám buồng đột xuất!', 'phase'); sfx(m.e === 'inspect' ? 'whistle' : 'alarm', 0.6); break;
   }
 }
+
+// Lời mời cược: làm tốt thì được thử vòng khó hơn (thưởng nhân lên, thua thì mất điểm). Bấm F hoặc bấm vào khung để nhận.
+const betBox = document.createElement('div');
+betBox.id = 'betbox'; betBox.style.display = 'none';
+document.body.appendChild(betBox);
+let betTimer = 0;
+function hideBet() { betBox.style.display = 'none'; clearTimeout(betTimer); }
+function showBet(m) {
+  betBox.innerHTML = '';
+  const t = document.createElement('div'); t.textContent = `🎲 Cược vòng khó hơn: thưởng x${m.mul}  [${isTouch ? 'chạm vào đây' : 'F'}]`;
+  const sm = document.createElement('small'); sm.textContent = `Thua sẽ mất ${m.lose} điểm và 5 sức. Bỏ qua thì cứ đi tiếp.`;
+  betBox.append(t, sm);
+  betBox.style.display = 'block';
+  clearTimeout(betTimer); betTimer = setTimeout(hideBet, (m.secs || 9) * 1000);
+}
+function acceptBet() { if (betBox.style.display === 'none') return; hideBet(); send({ t: 'betgo' }); }
+betBox.addEventListener('click', acceptBet);
+window.addEventListener('keydown', (e) => { if (e.code === 'KeyF' && !e.repeat && !typing && !minigameActive() && betBox.style.display !== 'none') { e.preventDefault(); acceptBet(); } });
 
 function openMinigame(m) {
   closeShop(); releaseMouse(); // minigame cần con trỏ chuột
@@ -546,7 +565,7 @@ function onSnapshot(s) {
 }
 
 // ===================== HUD =====================
-let digPct = 0, digOpen = false, shopKey = '', itemsKey = '', stockKey = '';
+let digPct = 0, digOpen = false, shopKey = '', itemsKey = '', stockKey = '', ctKey = '';
 
 // Thông báo giờ sinh hoạt ở giữa phía trên màn hình mỗi khi chuyển giai đoạn
 let phaseBannerTimer = 0;
@@ -622,7 +641,7 @@ function updateHud(s) {
       itemsEl.appendChild(d);
     }
   }
-  const sk = `${m.stock.reddog}|${m.stock.bomb}|${m.boost}|${m.rock}|${curEvent}|${m.chased}|${m.warn}|${m.fc}`;
+  const heatB = Math.floor((m.heat || 0) / 10), sk = `${m.stock.reddog}|${m.stock.bomb}|${m.boost}|${m.rock}|${curEvent}|${m.chased}|${m.warn}|${m.fc}|${m.st || 0}|${heatB}`;
   if (sk !== stockKey) {
     stockKey = sk;
     const st = $('stock');
@@ -636,6 +655,25 @@ function updateHud(s) {
     if (m.chased) { const d = document.createElement('span'); d.className = 'stock boost'; d.textContent = '🏃 ĐANG BỊ RƯỢT!'; st.appendChild(d); }
     if (m.warn > 0) { const d = document.createElement('span'); d.className = 'stock boost'; d.textContent = m.warn >= RULES.warnWatch ? `⚠️ Bị để mắt (${m.warn} cảnh cáo)` : `⚠️ Cảnh cáo ${m.warn}/${RULES.warnWatch}`; st.appendChild(d); }
     if (m.fc > 0) { const d = document.createElement('span'); d.className = 'stock boost'; d.textContent = `✂️ Dây thép ${m.fc}/${RULES.fenceCuts}`; st.appendChild(d); }
+    if ((m.st || 0) >= 2) { const d = document.createElement('span'); d.className = 'stock boost'; d.textContent = `🔥 Chuỗi x${m.st} (+${Math.min(50, 10 * (m.st - 1))}% thưởng)`; st.appendChild(d); }
+    if (heatB >= 2) { const d = document.createElement('span'); d.className = 'stock boost'; d.textContent = `🌡️ Nóng ${heatB * 10}%: quản giáo để ý hơn`; st.appendChild(d); }
+  }
+  { // hợp đồng trong ngày
+    const ct = m.ct || [], key = JSON.stringify(ct);
+    if (key !== ctKey) {
+      ctKey = key;
+      const box = $('contracts');
+      box.innerHTML = '';
+      if (ct.length) {
+        const h = document.createElement('div'); h.className = 'cth'; h.textContent = '📋 Hợp đồng hôm nay'; box.appendChild(h);
+        for (const [label, prog, need, done, pts, jack] of ct) {
+          const d = document.createElement('div'); d.className = `ct${done ? ' done' : ''}`;
+          d.innerHTML = `<i style="width:${Math.min(100, (prog / need) * 100)}%"></i>`;
+          const sp = document.createElement('span'); sp.textContent = `${label} (${prog}/${need}) · +${pts}đ +${jack}J`; d.appendChild(sp);
+          box.appendChild(d);
+        }
+      }
+    }
   }
   digPct = s.dig[0]; digOpen = !!s.dig[1];
   $('digrow').textContent = digOpen ? 'Đường hầm: ĐÃ THÔNG!' : (digPct > 0 ? `Đường hầm: ${digPct}%` : '');

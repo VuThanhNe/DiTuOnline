@@ -21,6 +21,8 @@ Nhạc nền: `public/music/day.mp3` (ban ngày) và `public/music/night.mp3` (g
 
 ## Luật chơi
 
+**Minigame thích ứng (mới):** độ khó tăng theo cấp thành thạo từng loại và theo ngày; chấm hạng Hoàn hảo/Tốt/Đạt/Kém/Hỏng; làm Tốt liên tiếp tạo **chuỗi 🔥** (thưởng tới x1,5); làm Tốt xong có thể **cược** vòng khó hơn bằng phím **F** (thưởng nhân lên, thua mất điểm); một số lượt có biến thể ⚡🎯📏; mỗi ngày có **3 hợp đồng** nhận điểm + Jack; hành vi gây chú ý làm tăng **mức nóng 🌡️** (quản giáo nhìn xa và phát hiện nhanh hơn). Làm việc đúng giờ ban ngày không thu hút quản giáo.
+
 - Một ngày gồm 7 giờ sinh hoạt (điểm danh, bữa sáng, lao động, tập luyện, bữa tối, tự do, tắt đèn).
 - Mỗi hoạt động là một minigame (14 loại: canh nhịp, gõ phím, nối dây, phân loại, bóng bàn, đập gạch...). Chơi tốt được nhiều điểm và Jack hơn.
 - Đủ 300 điểm cải tạo thì ra **Cổng trại** (tường phía đông, ban ngày) giữ E 5 giây để mãn hạn. Không tự động mãn hạn: bạn có thể tiếp tục kế hoạch vượt ngục.
@@ -66,4 +68,5 @@ npm run test:patrol
 npm run test:bots
 npm run test:lobby
 npm run test:netcode   # mô phỏng mạng trễ, kiểm tra nhân vật không bị kéo giật
+npm run test:mg        # độ khó thích ứng, chuỗi, cược, hợp đồng, mức nóng
 ```

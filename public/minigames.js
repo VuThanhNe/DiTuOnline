@@ -185,7 +185,7 @@ function aimGame(params, boosted) {
 const WIRE_COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71', '#b36bff'];
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function wiresGame(params) {
-  const n = params.n || 4, limit = 28;
+  const n = params.n || 4, limit = params.limit || 28;
   const L = shuffle([...Array(n).keys()]), R = shuffle([...Array(n).keys()]);
   const ys = Array.from({ length: n }, (_, i) => 62 + i * ((H - 130) / (n - 1)));
   const g = { left: limit, over: false, score: 0, mistakes: 0, shake: 0, done: new Array(n).fill(false), drag: null, sel: null, pad: null,

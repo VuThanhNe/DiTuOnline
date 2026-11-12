@@ -195,6 +195,7 @@ wss.on('connection', (ws, req) => {
     else if (msg.t === 'mgdone') room.mgDone(player, msg.token, Number(msg.score));
     else if (msg.t === 'mgcancel') room.cancelMg(player, false);
     else if (msg.t === 'hilo') room.hilo(player, msg.token, msg.pick);
+    else if (msg.t === 'betgo') room.betGo(player);
     else if (msg.t === 'buy') room.buy(player, msg.id, !!msg.premium);
     else if (msg.t === 'rock') room.throwRock(player, Number(msg.a));
     else if (msg.t === 'give') room.give(player);
@@ -228,6 +229,10 @@ setInterval(() => {
       console.log(`[băng thông] phòng ${r.id}: ${r.size} người, ${kbs.toFixed(1)} KB/s/người (~${(kbs * 3.6).toFixed(0)} MB/giờ/người)`);
     }
     r.bytes = 0;
+    // số đo minigame trong phút qua (để cân độ khó): lượt, tỉ lệ hỏng, tỉ lệ hoàn hảo, thời gian TB, độ khó TB
+    const parts = Object.entries(r.mgStats).filter(([, v]) => v.n > 0).map(([k, v]) => `${k}: ${v.n} lượt, hỏng ${Math.round((v.fail / v.n) * 100)}%, hoàn hảo ${Math.round((v.perfect / v.n) * 100)}%, ${(v.sumT / v.n).toFixed(1)}s, D${(v.sumD / v.n).toFixed(1)}`);
+    if (parts.length) console.log(`[minigame] phòng ${r.id}: ${parts.join(' | ')}`);
+    r.mgStats = {};
   }
 }, 60000);
 

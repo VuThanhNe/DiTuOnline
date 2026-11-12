@@ -178,3 +178,13 @@ button { font-family: inherit; }
 
 #leaveq { margin-top: 10px; background: #2a3038; color: #fff; border: 1px solid #3b434d; border-radius: 10px; padding: 9px 16px; cursor: pointer; font-size: 14px; }
 #leaveq:hover { border-color: #f2823a; }
+
+#contracts { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+#contracts .ct { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #26303c; color: #d6e2f0; position: relative; overflow: hidden; }
+#contracts .ct i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(90,170,255,.25); z-index: 0; }
+#contracts .ct span { position: relative; z-index: 1; }
+#contracts .ct.done { background: #2f4a2c; color: #d9ffd0; text-decoration: line-through; }
+#contracts .cth { font-size: 11px; color: #8fa0b3; margin-bottom: 1px; }
+#topleft.compact #contracts { display: none; }
+#betbox { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 30; padding: 10px 16px; border-radius: 12px; background: rgba(40,20,70,.94); border: 2px solid #b48cff; color: #f1e8ff; font-size: 15px; text-align: center; cursor: pointer; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+#betbox small { display: block; opacity: .8; margin-top: 3px; font-size: 12px; }

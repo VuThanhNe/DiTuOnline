@@ -35,6 +35,73 @@ const mgMin = (kind, params) => {
     default: return (params.rounds || 3) * 2;
   }
 };
+// ---------- Tiến trình minigame: độ khó thích ứng, biến thể, hợp đồng ----------
+// Mỗi người chơi có cấp thành thạo riêng cho từng loại minigame (p.mst[kind], 0..5). Độ khó D = cấp + thưởng theo ngày (tối đa 6).
+// D = 0 giữ nguyên tham số gốc; D = 6 là khó nhất. Việc giá trị cao (đào hầm, hàng rào, trộm đồ) đã được chỉnh riêng nên không đổi.
+const MG_MAX_D = 6;
+const MG_XP = { perfect: 0.4, good: 0.25, ok: 0.1, fail: -0.3 };
+const BET_MAX = 3, BET_WINDOW = 9; // số vòng cược liên tiếp tối đa; giây còn hiệu lực của lời mời cược
+const MUT_MUL = 1.3; // lượt có biến thể được thưởng thêm
+const MUTATORS = {
+  rush: { label: '⚡ Gấp', kinds: ['keys', 'pairs', 'wires', 'mash'] },
+  precise: { label: '🎯 Chính xác', kinds: ['timing', 'balance', 'memory', 'marbles', 'pong'] },
+  long: { label: '📏 Dài', kinds: ['sort', 'clean', 'kick', 'bricks', 'timing', 'pong'] },
+};
+const LETTER_POOL = 'ASDFGHJKLQWERTYUIOP';
+const ri = Math.round;
+function scaleParams(kind, P, t) { // t = D / MG_MAX_D (0..1)
+  switch (kind) {
+    case 'timing': P.rounds += ri(t * 2); P.speed += t * 1.1; P.zone *= 1 - 0.5 * t; break;
+    case 'keys': {
+      const pool = P.letters ? LETTER_POOL : 'UDLR';
+      for (let i = 0, n = ri(t * 5); i < n; i++) P.seq.push(pool[Math.floor(Math.random() * pool.length)]);
+      P.limit = Math.max(4.5, P.limit - t * 1.2); break;
+    }
+    case 'wires': P.n = Math.min(5, 4 + ri(t)); P.limit = ri(28 - t * 10); break; // tối đa 5 màu dây
+    case 'sort': P.n += ri(t * 5); break;
+    case 'memory': P.rounds += ri(t * 2); P.lives = t > 0.66 ? 1 : 2; break;
+    case 'pairs': P.limit = ri(30 - t * 8); break; // bộ thẻ chỉ có 6 cặp nên khó hơn bằng cách siết thời gian
+    case 'clean': P.n += ri(t * 6); break;
+    case 'mash': P.need *= 1 + t * 0.6; P.time = ri((P.time - t) * 10) / 10; break;
+    case 'balance': P.need = Math.min(P.dur * 0.9, P.need + t * 2); P.zone *= 1 - 0.35 * t; break;
+    case 'pong': P.hits += ri(t * 6); P.lives = t > 0.7 ? 2 : 3; break;
+    case 'kick': P.rounds += ri(t * 2); break;
+    case 'bricks': P.target = Math.min(22, P.target + ri(t * 6)); P.lives = t > 0.66 ? 1 : 2; break;
+    case 'marbles': if (t >= 0.5) { P.shots += 1; P.need += 1; } break;
+    case 'aim': P.rounds += ri(t); break;
+    default: break;
+  }
+}
+function applyMutator(kind, mut, P) {
+  if (mut === 'rush') {
+    if (P.limit) P.limit = Math.max(4, ri(P.limit * 0.75));
+    if (kind === 'mash') P.time = Math.max(4, ri(P.time * 0.8 * 10) / 10);
+  } else if (mut === 'precise') {
+    if (kind === 'timing') P.zone *= 0.7;
+    else if (kind === 'balance') P.zone *= 0.7;
+    else if (kind === 'memory') P.lives = 1;
+    else if (kind === 'marbles') P.need = Math.min(P.shots, P.need + 1);
+    else if (kind === 'pong') P.lives = Math.max(1, P.lives - 1);
+  } else if (mut === 'long') {
+    if (kind === 'sort' || kind === 'clean') P.n += 3;
+    else if (kind === 'kick' || kind === 'timing') P.rounds += 1;
+    else if (kind === 'bricks') P.target = Math.min(22, P.target + 3);
+    else if (kind === 'pong') P.hits += 3;
+  }
+}
+// Hợp đồng ngày: mỗi người 3 hợp đồng, làm xong nhận điểm + Jack
+const CONTRACT_TPL = [
+  { type: 'good', label: (n) => `Làm ${n} lượt đạt Tốt trở lên`, need: (d) => 3 + Math.min(3, d >> 1), rew: { pts: 12, jack: 8 } },
+  { type: 'perfect', label: (n) => `Đạt Hoàn hảo ${n} lần`, need: () => 2, rew: { pts: 15, jack: 10 } },
+  { type: 'streak', label: (n) => `Đạt chuỗi 🔥 x${n}`, need: (d) => (d >= 3 ? 4 : 3), rew: { pts: 12, jack: 8 } },
+  { type: 'variety', label: (n) => `Làm việc ở ${n} loại trạm khác nhau`, need: () => 3, rew: { pts: 10, jack: 10 } },
+  { type: 'bet', label: (n) => `Thắng ${n} vòng cược 🎲`, need: () => 1, rew: { pts: 15, jack: 12 } },
+  { type: 'mut', label: (n) => `Hoàn thành ${n} lượt có biến thể (⚡🎯📏)`, need: () => 1, rew: { pts: 12, jack: 10 } },
+];
+const gradeOf = (score) => (score >= 0.99 ? 'perfect' : score >= 0.85 ? 'good' : score >= 0.6 ? 'ok' : score > 0 ? 'poor' : 'fail');
+const GRADE_NAME = { perfect: 'Hoàn hảo', good: 'Tốt', ok: 'Đạt', poor: 'Kém', fail: 'Hỏng' };
+const GRADE_TIER = { perfect: 1.5, good: 1.2, ok: 1, poor: 0.5, fail: 0 };
+
 // Vị trí người/NPC trong gói snapshot nén thành số nguyên: x,z theo 0,1 m; góc theo 0,05 rad (client chia lại).
 const Q = (v) => Math.round(v * 10);
 const QA = (v) => Math.round(v * 20);
@@ -91,6 +158,7 @@ export class Room {
     this.bombSeq = 1;
     this.event = null;
     this.fields = new Map(); // cache trường khoảng cách cho quản giáo
+    this.mgStats = {}; // số đo minigame theo loại: số lượt, hỏng, hoàn hảo, tổng thời gian, tổng độ khó (log mỗi phút + /status)
     this.sayAt = new Map();
     this.lightLit = new Map();
     this.npcs = [];
@@ -141,7 +209,9 @@ export class Room {
       boost: 0, stun: 0, mg: null, hurtT: 0, lastAct: 0,
       sneak: false, rockCd: 0, bombHeat: 0, chased: false, disc: false, discAt: 0,
       warn: 0, fenceCuts: 0, t0: this.clock, exitNoiseT: 0, run: false, runNoiseT: 0, activeAt: Date.now(),
+      mst: {}, streak: 0, heat: 0, offer: null, contracts: [], // cấp thành thạo theo loại minigame, chuỗi, mức nóng, lời mời cược, hợp đồng ngày
     };
+    this.newContracts(p);
     p.sid = randomUUID(); // mật mã an toàn: ai đoán được sid là chiếm được nhân vật đang mất kết nối
     this.players.set(id, p);
     this.emptySince = null;
@@ -264,7 +334,11 @@ export class Room {
     this.phaseT = PHASES[this.phase].dur;
     if (this.phase === 0) {
       this.day++;
-      for (const p of this.players.values()) { p.bombBuys = 0; p.warn = Math.max(0, p.warn - 1); } // sang ngày mới: được xoá bớt một cảnh cáo
+      for (const p of this.players.values()) { // sang ngày mới: được xoá bớt một cảnh cáo, nhận hợp đồng mới
+        p.bombBuys = 0; p.warn = Math.max(0, p.warn - 1);
+        this.newContracts(p);
+        this.toast(p, '📋 Hợp đồng mới trong ngày đã có (xem bảng bên trái).', 'hint');
+      }
       if (this.dig.pr > 0 || this.dig.open) {
         this.sys('Quản giáo phát hiện và lấp đường hầm trong đêm. Công việc đào phải làm lại từ đầu.');
         this.dig = { pr: 0, open: false };
@@ -347,7 +421,7 @@ export class Room {
 
   resetInmate(p) {
     const sp = pick(CELL_SPAWNS);
-    p.warn = 0; p.fenceCuts = 0; p.chased = false;
+    p.warn = 0; p.fenceCuts = 0; p.chased = false; p.streak = 0; p.heat = 0; p.offer = null; this.newContracts(p);
     p.x = sp[0]; p.z = sp[1]; p.pts = 0; p.items = {}; p.hold = null; p.detect = 0; p.jail = 0; p.mg = null;
     p.hp = RULES.hpMax; p.en = ENERGY.max; p.jack = 0; p.labor = 0; p.stock = { reddog: 0, bomb: 0 }; p.boost = 0; p.stun = 0;
     this.send(p, { t: 'tp', x: p.x, z: p.z });
@@ -440,8 +514,12 @@ export class Room {
     this.noise(p.x, p.z, R, s.snd);
   }
 
+  // Mức "nóng": hành vi gây chú ý làm quản giáo nhìn xa và phát hiện nhanh hơn (tối đa +25% tầm nhìn, +50% tốc độ phát hiện); tự nguội dần
+  addHeat(p, n) { p.heat = Math.min(100, (p.heat || 0) + n); }
+
   updatePlayer(p, dt) {
     p.tl = (p.tl || 0) + dt; // đã mô phỏng thêm dt giây với lệnh hiện tại
+    if (p.heat > 0) p.heat = Math.max(0, p.heat - dt * 0.5);
     if (p.touchCd > 0) p.touchCd -= dt;
     if (p.stun > 0) p.stun -= dt;
     if (p.boost > 0) p.boost -= dt;
@@ -486,7 +564,7 @@ export class Room {
       stepMove(p, p.mx, p.mz, dt, speed);
       p.ry = Math.atan2(p.mx, p.mz);
       p.en = Math.max(0, p.en - (running ? ENERGY.runDrain : ENERGY.moveDrain) * dt * (p.boost > 0 ? 1.5 : 1));
-      if ((p.boost > 0 || running) && !p.sneak) { p.lastAct += dt; if (p.lastAct > (running ? 0.9 : 1.2)) { p.lastAct = 0; this.noise(p.x, p.z, running ? RULES.runNoise : 7, null); } }
+      if ((p.boost > 0 || running) && !p.sneak) { p.lastAct += dt; if (p.lastAct > (running ? 0.9 : 1.2)) { p.lastAct = 0; this.noise(p.x, p.z, running ? RULES.runNoise : 7, null); this.addHeat(p, 1.5); } }
     } else if (!p.hold) {
       p.en = Math.min(ENERGY.max, p.en + ENERGY.regen * dt);
     }
@@ -594,7 +672,19 @@ export class Room {
   }
 
   // ---------- Minigame ----------
-  mgParams(s) {
+  // Tham số minigame đã chỉnh theo độ khó D (0..6) và biến thể (nếu có)
+  mgParams(s, D = 0, mut = null) {
+    const P = this.mgBase(s);
+    if (HIGH_VALUE_KINDS.has(s.kind) || s.mg === 'hilo' || D <= 0 && !mut) return P;
+    if (D > 0) scaleParams(s.mg, P, Math.min(1, D / MG_MAX_D));
+    if (mut) applyMutator(s.mg, mut, P);
+    return P;
+  }
+
+  // Độ khó hiện tại của người chơi ở một loại minigame: cấp thành thạo + thưởng theo ngày
+  mgDifficulty(p, kind) { return Math.min(MG_MAX_D, (p.mst[kind] || 0) + Math.min(3, (this.day - 1) * 0.4)); }
+
+  mgBase(s) {
     const kind = s.mg;
     if (kind === 'timing') {
       const dig = s.kind === 'dig';
@@ -628,19 +718,30 @@ export class Room {
     return { rounds: 3 }; // aim
   }
 
-  startMg(p, s) {
+  startMg(p, s, opts = {}) {
     if (p.mg) return;
-    const params = this.mgParams(s);
+    const special = HIGH_VALUE_KINDS.has(s.kind) || s.mg === 'hilo';
+    const bet = special ? 0 : opts.bet || 0;
+    const D = special ? 0 : Math.min(MG_MAX_D, this.mgDifficulty(p, s.mg) + bet * 1.5);
+    let mut = null;
+    if (!special && !bet && D >= 2 && Math.random() < 0.35) {
+      const choices = Object.keys(MUTATORS).filter((k) => MUTATORS[k].kinds.includes(s.mg));
+      if (choices.length) mut = pick(choices);
+    }
+    p.offer = null;
+    const params = this.mgParams(s, D, mut);
     p.en = Math.max(0, p.en - (s.cost || 0));
     const min = HIGH_VALUE_KINDS.has(s.kind) ? Math.max(mgMin(s.mg, params), MG_HIGH_VALUE_MIN) : mgMin(s.mg, params);
-    p.mg = { sid: s.id, kind: s.mg, token: randomUUID().slice(0, 12), t0: this.clock, min, expire: this.clock + Math.max(MG_LIMIT[s.mg] ?? MG_LIMIT_DEFAULT, min + 5), noiseT: 1.2 };
+    p.mg = { sid: s.id, kind: s.mg, token: randomUUID().slice(0, 12), t0: this.clock, min, expire: this.clock + Math.max(MG_LIMIT[s.mg] ?? MG_LIMIT_DEFAULT, min + 5), noiseT: 1.2, bet, mut, D };
+    let title = s.mgTitle || s.label;
+    if (!special) title += ` · Cấp ${Math.floor(p.mst[s.mg] || 0) + 1}${mut ? ` · ${MUTATORS[mut].label}` : ''}${bet ? ` · 🎲 Cược vòng ${bet}` : ''}`;
     if (s.mg === 'hilo') { // chơi bài: server rút sẵn cả hai lá, chỉ cho client xem lá đầu (không thể gian lận lá thứ hai)
       const c1 = this.drawCard(), c2 = this.drawCard();
       p.mg.hilo = { c1, c2, done: false };
       params.card = c1;
     }
     p.hold = null;
-    this.send(p, { t: 'mg', kind: s.mg, token: p.mg.token, title: s.mgTitle || s.label, params, boosted: p.boost > 0 });
+    this.send(p, { t: 'mg', kind: s.mg, token: p.mg.token, title, params, boosted: p.boost > 0 });
     this.stationNoise(p, s);
   }
 
@@ -675,18 +776,17 @@ export class Room {
     // cắt hàng rào: phải còn đủ dụng cụ lúc hoàn thành (không dùng availability() vì sức đã bị trừ lúc bắt đầu).
     // Đào hầm không cần kiểm lại giờ: minigame bị huỷ mỗi khi đổi giờ sinh hoạt (updatePhase).
     if (s.kind === 'fence' && !FENCE_ITEMS.every((k) => p.items[k])) return;
-    this.settle(p, s, score);
+    this.settle(p, s, score, g);
   }
 
-  settle(p, s, score) {
-    const tier = score >= 0.99 ? 1.5 : score >= 0.6 ? 1 : score > 0 ? 0.5 : 0;
+  settle(p, s, score, g = {}) {
     if (s.kind === 'fence') {
       if (score >= 0.9) { // phải cắt liên tiếp RULES.fenceCuts sợi: mỗi sợi là một lượt ồn ào
         p.fenceCuts++;
         if (p.fenceCuts >= RULES.fenceCuts) { p.fenceCuts = 0; this.escape(p); }
         else { this.toast(p, `Cắt đứt sợi dây thép ${p.fenceCuts}/${RULES.fenceCuts}. Tiếp tục trước khi quản giáo tới!`, 'item'); this.noise(p.x, p.z, 20, 'bad'); }
       } else {
-        p.fenceCuts = 0; // hỏng một lần là phải cắt lại từ đầu
+        p.fenceCuts = 0; this.addHeat(p, 20); // hỏng một lần là phải cắt lại từ đầu
         this.toast(p, 'Cắt hỏng! Dây thép bật lại, báo động vang khắp trại — làm lại từ sợi đầu tiên.', 'warn');
         this.noise(p.x, p.z, 42, 'bad');
         this.broadcast({ t: 'snd', k: 'alarm', x: r2(p.x), z: r2(p.z) });
@@ -717,22 +817,92 @@ export class Room {
         this.broadcast({ t: 'snd', k: 'pickup', x: r2(p.x), z: r2(p.z) });
         this.toast(p, `Bạn đã lấy được: ${ITEM_NAMES[s.item]}. Đừng để quản giáo khám xét!`, 'item');
       } else {
+        this.addHeat(p, 10);
         this.toast(p, 'Bẻ khoá thất bại! Tiếng động có thể làm quản giáo chú ý.', 'warn');
         this.noise(p.x, p.z, 14, 'bad');
       }
       return;
     }
-    if (tier === 0) { this.toast(p, 'Làm hỏng hoàn toàn, không được gì!', 'warn'); return; }
+    this.mgResult(p, s, score, g);
+  }
+
+  // Kết quả một lượt minigame thường: hạng, chuỗi, cấp thành thạo, thưởng/phạt, cược, hợp đồng, số đo
+  mgResult(p, s, score, g) {
+    const kind = s.mg, grade = gradeOf(score), bet = g.bet || 0, mut = g.mut || null;
+    const lv0 = p.mst[kind] || 0;
+    p.mst[kind] = clamp(lv0 + (MG_XP[grade] ?? MG_XP.fail), 0, 5);
+    if (Math.floor(p.mst[kind]) > Math.floor(lv0)) this.toast(p, `📈 Lên cấp ${Math.floor(p.mst[kind]) + 1} ở "${s.label}": các lượt sau khó hơn nhưng thưởng cũng vậy.`, 'item');
+    if (score >= 0.85) p.streak++; else if (score < 0.6) p.streak = 0;
+    const st = (this.mgStats[kind] ||= { n: 0, fail: 0, perfect: 0, sumT: 0, sumD: 0 });
+    st.n++; st.sumT += Math.max(0, this.clock - (g.t0 || this.clock)); st.sumD += g.D || 0;
+    if (score < 0.6) st.fail++;
+    if (grade === 'perfect') st.perfect++;
+
+    if (score < 0.6) { // thất bại: mất sức, mất chuỗi; thua cược thì mất thêm điểm
+      p.en = Math.max(0, p.en - 5);
+      let msg = `${GRADE_NAME[grade]}! -5 sức, mất chuỗi.`;
+      if (bet) { const lose = Math.min(p.pts, Math.round(s.pts * 0.6)); p.pts -= lose; msg = `Thua cược! -${lose} điểm, -5 sức.`; }
+      this.toast(p, msg, 'warn');
+      if (grade === 'fail' || bet) return;
+    }
+    const tier = GRADE_TIER[grade];
+    const streakMul = 1 + Math.min(0.5, 0.1 * Math.max(0, p.streak - 1));
+    const mul = streakMul * (mut ? MUT_MUL : 1) * (bet ? 1 + 0.6 * bet : 1);
     p.done[s.group] = (p.done[s.group] || 0) + 1;
-    const pts = Math.max(1, Math.round(s.pts * tier));
-    const jack = s.jack ? Math.max(1, Math.round(s.jack * tier)) : 0;
+    const pts = Math.max(1, Math.round(s.pts * tier * mul));
+    const jack = s.jack ? Math.max(1, Math.round(s.jack * tier * mul)) : 0;
     p.jack += jack;
     let extra = jack ? ` · +${jack} Jack` : '';
+    if (p.streak >= 2) extra += ` · 🔥 chuỗi x${p.streak}`;
+    if (mut) extra += ` · ${MUTATORS[mut].label}`;
+    if (bet) extra += ` · thắng cược x${(1 + 0.6 * bet).toFixed(1)}`;
     if (s.kind === 'work' || s.kind === 'chore') {
       if (score >= 0.6) { p.labor++; extra += ` · ca lao động #${p.labor}`; }
       else extra += ' · ca làm ẩu, không tính';
     }
-    this.addPoints(p, pts, tier === 1.5 ? `${s.label} xuất sắc` : s.label.toLowerCase(), extra);
+    this.addPoints(p, pts, `${s.label.toLowerCase()}: ${GRADE_NAME[grade]}`, extra);
+    this.contractEvent(p, { grade, score, kind, mut, bet });
+    // mời cược: làm tốt thì được thử vòng khó hơn để nhân thưởng (thua thì mất điểm)
+    if (score >= 0.85 && bet < BET_MAX && (!s.cost || p.en >= s.cost) && !(s.group && (p.done[s.group] || 0) >= s.cap)) {
+      p.offer = { sid: s.id, bet: bet + 1, exp: this.clock + BET_WINDOW };
+      this.send(p, { t: 'bet', n: bet + 1, mul: +(1 + 0.6 * (bet + 1)).toFixed(1), lose: Math.round(s.pts * 0.6), secs: BET_WINDOW });
+    } else p.offer = null;
+  }
+
+  // Người chơi nhận lời mời cược (phím F): bắt đầu vòng khó hơn ở cùng trạm
+  betGo(p) {
+    const o = p.offer;
+    if (!o || this.clock > o.exp || p.mg || p.jail > 0 || p.stun > 0) return;
+    const s = STATION_BY_ID.get(o.sid);
+    p.offer = null;
+    if (!s || !p.near || p.near.s.id !== s.id || !p.near.ok) { this.toast(p, 'Bạn phải đứng ở trạm để chơi vòng cược.', 'warn'); return; }
+    this.touch(p);
+    this.startMg(p, s, { bet: o.bet });
+  }
+
+  // ---------- Hợp đồng ngày ----------
+  newContracts(p) {
+    const d = this.day, first = CONTRACT_TPL[0];
+    const rest = CONTRACT_TPL.slice(1).sort(() => Math.random() - 0.5).slice(0, 2);
+    p.contracts = [first, ...rest].map((t) => { const need = t.need(d); return { type: t.type, label: t.label(need), need, prog: 0, done: false, rew: t.rew, seen: [] }; });
+  }
+
+  contractEvent(p, ev) {
+    for (const c of p.contracts || []) {
+      if (c.done) continue;
+      const okRun = ev.score >= 0.6;
+      if (c.type === 'good') { if (ev.score >= 0.85) c.prog++; }
+      else if (c.type === 'perfect') { if (ev.grade === 'perfect') c.prog++; }
+      else if (c.type === 'streak') c.prog = Math.max(c.prog, p.streak);
+      else if (c.type === 'variety') { if (okRun && !c.seen.includes(ev.kind)) { c.seen.push(ev.kind); c.prog = c.seen.length; } }
+      else if (c.type === 'bet') { if (ev.bet && okRun) c.prog++; }
+      else if (c.type === 'mut') { if (ev.mut && okRun) c.prog++; }
+      if (c.prog >= c.need) {
+        c.done = true; c.prog = c.need;
+        p.jack += c.rew.jack;
+        this.addPoints(p, c.rew.pts, `hợp đồng xong: ${c.label}`, ` · +${c.rew.jack} Jack`);
+      }
+    }
   }
 
   // ---------- Chợ đen ----------
@@ -789,7 +959,7 @@ export class Room {
     const b = { id: this.bombSeq++, x: p.x + Math.sin(ang) * d, z: p.z + Math.cos(ang) * d, t: RULES.bombFuse, owner: p.id };
     this.bombs.push(b);
     this.broadcast({ t: 'bomb', id: b.id, x: r2(b.x), z: r2(b.z), fuse: RULES.bombFuse, ox: r2(p.x), oz: r2(p.z) });
-    this.noise(p.x, p.z, 8, 'fuse');
+    this.noise(p.x, p.z, 8, 'fuse'); this.addHeat(p, 25);
   }
 
   // Ném đá đánh lạc hướng: tạo tiếng động ở chỗ đá rơi
@@ -847,7 +1017,8 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.jail > 0) { p.detect = 0; p.chased = false; continue; }
       const watched = p.warn >= RULES.warnWatch; // bị quản giáo để mắt: nhìn xa hơn, phát hiện nhanh hơn
-      const range = baseRange * (watched ? RULES.watchRangeMul : 1);
+      const heatK = (p.heat || 0) / 100;
+      const range = baseRange * (watched ? RULES.watchRangeMul : 1) * (1 + 0.25 * heatK);
       const zone = zoneAt(p.x, p.z);
       const mgStation = p.mg ? STATION_BY_ID.get(p.mg.sid) : null;
       let violation = null;
@@ -870,7 +1041,8 @@ export class Room {
         if (d <= RULES.guardCloseRange && !touch) touch = g;
       }
       if (p.chased) { p.detect = 1; continue; } // đang bị quản giáo rượt: chạy đi!
-      if (violation && seen) p.detect = Math.min(1, p.detect + (dt / RULES.detectSeconds) * (p.sneak ? RULES.sneakDetect : 1) * (watched ? RULES.watchDetectMul : 1));
+      if (violation && seen) this.addHeat(p, dt * 10); // bị thấy đang vi phạm: nóng dần
+      if (violation && seen) p.detect = Math.min(1, p.detect + (dt / RULES.detectSeconds) * (p.sneak ? RULES.sneakDetect : 1) * (watched ? RULES.watchDetectMul : 1) * (1 + 0.5 * heatK));
       else p.detect = Math.max(0, p.detect - dt * 0.8);
       if (p.detect >= 1 && seenBy) { // bị phát hiện: quản giáo gần nhất lao tới bắt
         seenBy.chase = { pid: p.id, why: violation || 'vi phạm nội quy', t: 0, lost: 0 };
@@ -906,7 +1078,7 @@ export class Room {
       this.anim(g.id, 'search');
       this.anim(p.id, 'handsup');
       this.broadcast({ t: 'snd', k: 'whistle', x: r2(p.x), z: r2(p.z) });
-      this.cancelMg(p);
+      this.cancelMg(p); this.addHeat(p, 15);
       p.stun = Math.max(p.stun, 1.8);
       if (contra) {
         p.items = {}; p.stock.bomb = 0;
@@ -1148,7 +1320,8 @@ export class Room {
       const slow = {
         items: p.items, near, jk: p.jailKind, jack: p.jack, labor: p.labor,
         boost: Math.ceil(Math.max(0, p.boost)), rock: Math.ceil(Math.max(0, p.rockCd)),
-        stock: p.stock, buys: p.bombBuys, goal: p.goalCache,
+        stock: p.stock, buys: p.bombBuys, goal: p.goalCache, st: p.streak,
+        ct: p.contracts.map((c) => [c.label, c.prog, c.need, c.done ? 1 : 0, c.rew.pts, c.rew.jack]),
       };
       const key = JSON.stringify(slow);
       const out = {
@@ -1160,7 +1333,7 @@ export class Room {
           hold: p.hold && p.hold.need ? r2(p.hold.t / p.hold.need) : (p.hold ? -1 : 0),
           seq: p.inSeq, ia: Math.round((p.tl || 0) * 1000), x: r2(p.x), z: r2(p.z), // ia: số ms lệnh seq đã được áp dụng
           hp: Math.round(p.hp), en: Math.round(p.en), chased: p.chased ? 1 : 0, stun: p.stun > 0 ? 1 : 0,
-          warn: p.warn, fc: p.fenceCuts,
+          warn: p.warn, fc: p.fenceCuts, heat: Math.round(p.heat || 0),
         },
       };
       if (key !== p.lastSlow || n % 75 === 0) { out.me2 = slow; p.lastSlow = key; }

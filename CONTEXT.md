@@ -112,6 +112,17 @@ Game giả lập đời sống trại giam, 3D, nhiều người chơi realtime,
 
 **Sửa lỗi (2026-11-12):** quản giáo lao tới và hiện ❗ khi người chơi đang làm việc đúng giờ ban ngày. Nguyên nhân: `stationNoise` vẫn gây tiếng động (45% bán kính) cho việc hợp lệ. Nay làm việc hợp lệ ban ngày không thu hút quản giáo (bán kính 0, vẫn phát âm thanh); lén lút (đào, hàng rào, trộm kho, làm sai giờ) và ban đêm vẫn gây tiếng động như cũ. Tiếng chạy/tăng lực (`runNoise`) và bom không đổi.
 
+## Đợt 11: cải tổ gameplay (REDESIGN_PLAN giai đoạn 0, 1 và một phần 2)
+- **Độ khó thích ứng (A1):** mỗi người có cấp thành thạo `p.mst[loại]` (0..5): Hoàn hảo +0,4, Tốt +0,25, Đạt +0,1, hỏng -0,3. Độ khó `D = cấp + thưởng theo ngày (0,4/ngày, tối đa 3)`, chặn ở 6. `scaleParams` (game.js) tăng độ khó từng loại (timing: vòng/tốc độ/vùng hẹp; keys: dài hơn, ít giờ hơn; wires 4->5 dây + hạn giờ ngắn hơn; sort/clean nhiều mục; memory thêm vòng, 1 mạng; pairs ít giờ; mash/balance/pong/kick/bricks/marbles/aim). Ngày 1, người mới: D = 0 = tham số cũ. Việc giá trị cao (đào hầm, cắt rào, trộm đồ) và bài lớn/nhỏ **không** đổi. Client chỉ cần thêm `params.limit` cho `wiresGame`.
+- **Hạng + chuỗi (A2):** Hoàn hảo / Tốt (>=0,85) / Đạt / Kém / Hỏng. Chuỗi `p.streak` tăng khi >= Tốt, mất khi < Đạt; thưởng x(1 + 0,1 x (chuỗi-1)), tối đa x1,5. **Hỏng (<0,6)** mất 5 sức và chuỗi.
+- **Cược (A3):** làm >= Tốt thì server gửi `bet`; phím **F** (hoặc chạm khung) gửi `betgo` bắt đầu vòng khó hơn (D+1,5/vòng, tối đa 3 vòng liên tiếp, lời mời hiệu lực 9s, phải đứng ở trạm). Thắng thưởng x(1+0,6 x vòng); thua mất 60% điểm gốc của trạm + 5 sức.
+- **Biến thể (A5):** từ D >= 2, 35% lượt có biến thể ⚡ Gấp / 🎯 Chính xác / 📏 Dài (tuỳ loại minigame), thưởng x1,3. Tiêu đề khung minigame hiện cấp, biến thể, vòng cược.
+- **Hợp đồng ngày (B1):** mỗi người 3 hợp đồng (luôn có "Tốt trở lên", + 2 trong: Hoàn hảo, chuỗi, nhiều loại trạm, thắng cược, có biến thể), mới mỗi sáng, hiện ở HUD trái (`#contracts`), thưởng 10-15 điểm + 8-12 Jack.
+- **Mức nóng (B2):** `p.heat` 0..100, nguội 0,5/giây; tăng khi bị thấy vi phạm, chạy ồn, ném bom (+25), cắt rào hỏng (+20), bẻ khoá hỏng (+10), bị khám (+15). Nóng 100% = quản giáo nhìn xa +25% và phát hiện nhanh +50%. HUD hiện chip khi >= 20%.
+- **Số đo (giai đoạn 0):** log `[minigame]` mỗi phút (lượt, tỉ lệ hỏng, hoàn hảo, thời gian TB, độ khó TB theo loại). Dùng để chỉnh `MG_XP`, `scaleParams`. Chưa có số liệu người chơi thật.
+- Test mới: `npm run test:mg` (40 kiểm tra). Các bộ cũ vẫn đạt.
+- **Chưa làm** (cần quyết định của chủ dự án hoặc việc lớn): A6 minigame đôi, A7 chấm điểm server, B3 thêm đường vượt ngục, B4 vai trò, B5 giao dịch, B6 sự kiện có lựa chọn, B7 quản giáo thông minh, ván có kết thúc, lưu xếp hạng bền.
+
 ## Đợt 4: sửa lỗi + mở rộng
 **Bản đồ mở rộng** (`WORLD` -40..64 x -30..48): khu đông có Phòng y tế (khám, giường bệnh hồi máu), Phòng giặt, Vườn rau; dãy nam có Phòng giải trí (bóng bàn, chơi bài, tivi), Phòng gym, Phòng tắm. Sân tập có khung thành, tường gạch, vòng bắn bi (trạm đá bóng, đập gạch, bắn bi, hít đất, kéo xà, tập thể dục). Giặt/vườn là kind `chore` (tính ca lao động); tivi/tắm/khám là kind `rest` (giữ E, hồi máu/sức); `play` là bóng bàn/chơi bài. Mỗi trạm/tuyến tuần tra/điểm mèo phải nằm trên chỗ trống (kiểm tra bằng `blocked`/`distField`).
 **Mèo cathehe:** NPC `kind: 'cat'` (`CAT`, `CAT_SPOTS`), tự đi giữa các điểm bằng `walkGuard`, ngồi nghỉ khi `wait > 0` (cờ snapshot = 2), kêu meo (`NPC_LINES.cat`, sfx `meow`).
