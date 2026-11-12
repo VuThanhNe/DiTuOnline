@@ -9,6 +9,7 @@
     "test:patrol": "node server/test-patrol.js",
     "test:bots": "node server/test-bots.js",
     "test:lobby": "node server/test-lobby.js",
+    "test:netcode": "node server/test-netcode.js",
     "test:bandwidth": "node server/test-bandwidth.js"
   },
   "dependencies": {

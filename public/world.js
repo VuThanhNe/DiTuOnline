@@ -923,6 +923,7 @@ function makeCat() {
 }
 
 const K = ['hipL', 'hipR', 'hipLz', 'hipRz', 'kneeL', 'kneeR', 'shL', 'shR', 'shLz', 'shRz', 'elL', 'elR', 'lean', 'twist', 'bob', 'headX', 'headY', 'rootX', 'lift', 'rootZ', 'sleep'];
+const POSE_T = {};
 const damp = (cur, key, tgt, k) => { cur[key] = (cur[key] ?? tgt) + (tgt - (cur[key] ?? tgt)) * k; return cur[key]; };
 const angLerp = (a, b, t) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; };
 
@@ -985,7 +986,7 @@ export function animateCharacter(e, dt, speed, time, urgent) {
   if (ud.cat) return animateCat(e, dt, speed, time);
   const r = ud.rig;
   if (!r) return;
-  const T = {};
+  const T = POSE_T; // dùng lại một object cho mọi nhân vật (trước đây tạo object mới mỗi nhân vật mỗi khung hình -> phải dọn rác liên tục)
   for (const k of K) T[k] = 0;
   const flags = e.flags | 0;
   const act = (flags & 2) ? (flags >> 4) & 15 : -1;

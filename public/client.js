@@ -4,6 +4,7 @@ import {
 } from '/shared/map.js';
 import { stepMove, rayDist, moveSpeed, isRunning, blocked } from '/shared/sim.js';
 import { findPath } from '/shared/nav.js';
+import { predictFromServer, correctionFor } from '/shared/predict.js';
 import { buildWorld, updateGates, animateGates, setDigProgress, setFenceCuts, makeCharacter, animateCharacter, makeSprite, drawText, wrap, emojiSprite, makeArrowGeometry } from './world.js';
 import { initAudio, sfx, sfxAt, voiceAt, setPhaseMusic, toggleMute, isMuted, setRain, setVolume, getVolume } from './audio.js';
 import { startMinigame, forceCloseMinigame, minigameActive, minigameEvent } from './minigames.js';
@@ -301,7 +302,17 @@ let curEvent = null;
 let sid = '', myName = '', reconnecting = false, reconnectTries = 0;
 let queuedNow = false, kicked = false, rejected = false, connectTries = 0; // hàng chờ khi phòng đầy / bị mời ra / hàng chờ đầy / số lần thử khi máy chủ đang ngủ
 
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+// Giả lập mạng trễ để thử nghiệm: thêm ?lag=150&jitter=40 vào địa chỉ (ms trễ MỖI CHIỀU + độ rung). Không có tham số thì không ảnh hưởng gì.
+const _qs = new URLSearchParams(location.search);
+const SIM_LAG = Math.max(0, Number(_qs.get('lag')) || 0), SIM_JIT = Math.max(0, Number(_qs.get('jitter')) || 0);
+let _outAt = 0, _inAt = 0;
+function simDelay(prevAt) { return Math.max(prevAt, performance.now() + SIM_LAG + Math.random() * SIM_JIT); } // giữ đúng thứ tự gói như TCP
+function netSend(sock, str) {
+  if (!SIM_LAG && !SIM_JIT) { if (sock.readyState === 1) sock.send(str); return; }
+  _outAt = simDelay(_outAt);
+  setTimeout(() => { if (sock.readyState === 1) sock.send(str); }, _outAt - performance.now());
+}
+function send(o) { if (ws && ws.readyState === 1) netSend(ws, JSON.stringify(o)); }
 
 // ===================== Mạng =====================
 function connect(name) {
@@ -315,7 +326,12 @@ function connect(name) {
   // máy chủ miễn phí có thể đang "ngủ" và mất tới ~1 phút để thức dậy
   const wake = setTimeout(() => { if (ws === sock && !opened && !reconnecting) $('connmsg').textContent = 'Máy chủ miễn phí đang thức dậy, có thể mất tới 1 phút. Xin đợi...'; }, 6000);
   sock.onopen = () => { opened = true; clearTimeout(wake); connectTries = 0; sock.send(JSON.stringify({ t: 'join', name, sid })); };
-  sock.onmessage = (ev) => { try { onMsg(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
+  const deliver = (data) => { try { onMsg(JSON.parse(data)); } catch (e) { console.error(e); } };
+  sock.onmessage = (ev) => {
+    if (!SIM_LAG && !SIM_JIT) return deliver(ev.data);
+    _inAt = simDelay(_inAt);
+    setTimeout(() => { if (ws === sock) deliver(ev.data); }, _inAt - performance.now());
+  };
   sock.onclose = () => {
     clearTimeout(wake);
     if (ws !== sock) return;
@@ -397,7 +413,7 @@ function onMsg(m) {
     case 'sys': addChat(null, m.m); break;
     case 'toast': toast(m.m, m.kind); if (m.kind === 'good') sfx('good', 0.7); else if (m.kind === 'warn') sfx('bad', 0.6); break;
     case 'phase': phasesSeen++; break; // banner được hiện khi snapshot báo đổi giai đoạn
-    case 'tp': me.x = m.x; me.z = m.z; camFocus.set(m.x, 0, m.z); break;
+    case 'tp': me.x = m.x; me.z = m.z; visOffX = visOffZ = 0; inputHist.length = 0; camFocus.set(m.x, 0, m.z); break;
     case 'caught':
       forceCloseMinigame(); closeShop();
       toast(m.kind === 'office' ? `Kiệt sức! Bị nhốt ${m.secs} giây.` : `Bị bắt vì ${m.why}! Biệt giam ${m.secs} giây.`, 'warn');
@@ -408,6 +424,7 @@ function onMsg(m) {
     case 'rockfly': addRockFlight(m.ox, m.oz, m.x, m.z); break;
     case 'win': showBanner(m.kind === 'release' ? 'MÃN HẠN TÙ!\nBạn đã cải tạo tốt và được trả tự do.' : 'VƯỢT NGỤC THÀNH CÔNG!\nBạn đã trốn thoát khỏi trại giam.', m.kind, 5000); sfx('win'); break;
     case 'lb': renderLb(m); break;
+    case 'pong': netStat.ping = Math.round(performance.now() - m.c); break;
     case 'snd':
       if (m.self) sfx(m.k);
       else { sfxAt(m.k, m.x, m.z, me.x, me.z, m.k === 'boom' ? 70 : 32); if (Math.hypot(m.x - me.x, m.z - me.z) < 45) fxAt(m.k, m.x, m.z); }
@@ -463,18 +480,9 @@ function interpolate(e, nowS) {
 // Dự đoán phía client + đối chiếu với server: lưu lại các lệnh đã gửi (seq), khi nhận vị trí server (đã xử lý tới seq nào đó)
 // thì chạy lại các lệnh chưa được xác nhận trên vị trí đó để biết vị trí "đúng" hiện giờ, rồi chỉ sửa phần lệch thật sự.
 const inputHist = [];
-function predictFromServer(m) {
-  while (inputHist.length && inputHist[0].seq <= m.seq) inputHist.shift();
-  const tmp = { x: m.x, z: m.z, labor: me.labor };
-  const now = performance.now();
-  for (let i = 0; i < inputHist.length; i++) {
-    const h = inputHist[i];
-    let dur = Math.min(0.4, ((i + 1 < inputHist.length ? inputHist[i + 1].t : now) - h.t) / 1000);
-    const sp = moveSpeed({ boost: me.boost, en: me.en, sneak: h.sneak, run: h.run });
-    while (dur > 1e-4) { const st = Math.min(dur, 1 / 30); if (h.mx || h.mz) stepMove(tmp, h.mx, h.mz, st, sp); dur -= st; }
-  }
-  return tmp;
-}
+let visOffX = 0, visOffZ = 0; // độ lệch hiển thị của nhân vật mình, giảm dần về 0 (làm mượt mỗi lần sửa vị trí)
+const netStat = { ping: 0, snapGaps: [], lastSnapAt: 0, corr: [] }; // số đo cho bảng chẩn đoán (F3)
+// (thuật toán nằm ở /shared/predict.js để bộ kiểm thử mô phỏng mạng trễ dùng chung)
 
 let meSlow = {}; // thông tin ít đổi, server chỉ gửi khi thay đổi (me2)
 function onSnapshot(s) {
@@ -498,15 +506,25 @@ function onSnapshot(s) {
     if (e.kind === 'npc') e.flags = al; // tù nhân NPC: cờ hoạt động giống người chơi
   }
   const m = s.me;
-  const d = Math.hypot(m.x - me.x, m.z - me.z);
   me.jail = m.jail; me.labor = m.labor; me.boost = m.boost; me.en = m.en; me.stun = m.stun;
-  if (d > 3 || m.jail > 0) { me.x = m.x; me.z = m.z; inputHist.length = 0; } // dịch chuyển / bị giam: theo server hoàn toàn
+  netStat.snapGaps.push(nowT - (netStat.lastSnapAt || nowT)); netStat.lastSnapAt = nowT; if (netStat.snapGaps.length > 80) netStat.snapGaps.shift();
+  if (m.jail > 0) { me.x = m.x; me.z = m.z; inputHist.length = 0; visOffX = visOffZ = 0; } // bị giam: theo server hoàn toàn
   else {
-    // đối chiếu: lệch nhỏ thì bỏ qua (tránh giật), lệch vừa thì kéo dần, lúc đứng yên thì hội tụ về vị trí đúng
-    const t = predictFromServer(m), ex = t.x - me.x, ez = t.z - me.z, err = Math.hypot(ex, ez);
-    if (err > 2.5) { me.x = t.x; me.z = t.z; }
-    else if (err > 0.3) { me.x += ex * 0.25; me.z += ez * 0.25; }
-    else if (!inputVec().moving && err > 0.02) { me.x += ex * 0.3; me.z += ez * 0.3; }
+    // Đối chiếu: so vị trí hiện tại với vị trí "server + các lệnh chưa được xử lý" (KHÔNG so thẳng với vị trí server:
+    // khi mạng trễ, server luôn ở sau một đoạn bằng tốc độ x độ trễ, so thẳng sẽ kéo giật người chơi về liên tục).
+    const t = predictFromServer(m, inputHist, performance.now(), me), ex = t.x - me.x, ez = t.z - me.z, err = Math.hypot(ex, ez);
+    const c = correctionFor(err, inputVec().moving, me);
+    if (c.counted) netStat.corr.push(nowT);
+    let k = c.k;
+    if (c.snap) { me.x = t.x; me.z = t.z; visOffX = visOffZ = 0; k = 0; } // lệch rất xa (dịch chuyển): nhảy thẳng
+    if (k) {
+      const cx = ex * k, cz = ez * k;
+      me.x += cx; me.z += cz;
+      // phần vừa sửa được "trả góp" trên màn hình: nhân vật trượt về vị trí đúng trong ~0,15 giây thay vì nhảy cục
+      visOffX -= cx; visOffZ -= cz;
+      const vo = Math.hypot(visOffX, visOffZ); if (vo > 1.5) { visOffX *= 1.5 / vo; visOffZ *= 1.5 / vo; }
+    }
+    while (netStat.corr.length && nowT - netStat.corr[0] > 60) netStat.corr.shift();
   }
   if (s.ev !== curEvent) { curEvent = s.ev; setRain(curEvent === 'rain'); }
   if (s.ph !== lastPhase) {
@@ -988,16 +1006,26 @@ function updateAim() {
   vol.addEventListener('input', () => setVolume(vol.value / 100));
 })();
 
-setInterval(() => {
+// Gửi lệnh điều khiển: đều đặn mỗi 50 ms, và NGAY KHI đổi hướng/đổi phím (không chờ hết 50 ms) để client và server
+// đổi hướng cùng một thời điểm. Mỗi lệnh kèm mốc thời gian của client (ct) để server ghi nhận đúng khoảng cách giữa các lệnh.
+let lastInputAt = 0, lastInputKey = '', lastSentMx = 0, lastSentMz = 0;
+const inputKeyOf = (v) => `${v.act ? 1 : 0}${v.sneak ? 1 : 0}${v.run ? 1 : 0}${v.moving ? 1 : 0}`;
+function sendInput(v) {
   if (!joined || !ws || ws.readyState !== 1) return;
-  const v = inputVec();
-  const mx = +v.mx.toFixed(3), mz = +v.mz.toFixed(3);
+  const mx = +v.mx.toFixed(3), mz = +v.mz.toFixed(3), now = performance.now();
   ++seq;
   const still = me.stun || me.jail > 0; // choáng / bị giam thì server không cho di chuyển: lịch sử dự đoán cũng phải đứng yên
-  inputHist.push({ seq, mx: still ? 0 : mx, mz: still ? 0 : mz, sneak: v.sneak, run: v.run, t: performance.now() }); // để đối chiếu với vị trí server (predictFromServer)
-  if (inputHist.length > 60) inputHist.shift();
-  ws.send(JSON.stringify({ t: 'in', mx, mz, act: v.act, sneak: v.sneak, run: v.run, seq }));
-}, 50);
+  inputHist.push({ seq, mx: still ? 0 : mx, mz: still ? 0 : mz, sneak: v.sneak, run: v.run, t: now }); // để đối chiếu với vị trí server (shared/predict.js)
+  if (inputHist.length > 80) inputHist.shift();
+  lastInputAt = now; lastInputKey = inputKeyOf(v); lastSentMx = mx; lastSentMz = mz;
+  netSend(ws, JSON.stringify({ t: 'in', mx, mz, act: v.act, sneak: v.sneak, run: v.run, seq, ct: Math.round(now) }));
+}
+// gọi mỗi khung hình: nếu điều khiển vừa đổi thì gửi ngay (cách lần gửi trước ít nhất 25 ms để không vượt giới hạn tin nhắn của server)
+function sendInputIfChanged(v) {
+  if (performance.now() - lastInputAt < 25) return;
+  if (inputKeyOf(v) !== lastInputKey || Math.abs(v.mx - lastSentMx) + Math.abs(v.mz - lastSentMz) > 0.25) sendInput(v);
+}
+setInterval(() => { if (performance.now() - lastInputAt >= 45) sendInput(inputVec()); }, 50);
 
 // Rời hàng chờ
 $('leaveq').addEventListener('click', () => {
@@ -1024,7 +1052,7 @@ function initAudioIfStarted() { if (joined) initAudio(); }
 // ===================== Bản đồ nhỏ =====================
 const mm = $('minimap');
 const mmc = mm.getContext('2d');
-let mmStatic = null, mmScale = 5, mmBig = false, mmFrame = 0;
+let mmStatic = null, mmScale = 5, mmBig = false, mmLastDraw = 0;
 function hex(c) { return `#${c.toString(16).padStart(6, '0')}`; }
 function layoutMinimap() {
   const r = mm.getBoundingClientRect();
@@ -1276,6 +1304,38 @@ function separateBubbles(dt) {
   }
 }
 
+// ===================== Bảng chẩn đoán (F3): FPS, độ trễ mạng, số lần bị sửa vị trí, số lệnh vẽ =====================
+const diagEl = document.createElement('div');
+Object.assign(diagEl.style, { position: 'fixed', left: '8px', bottom: '56px', zIndex: '20', display: 'none', padding: '8px 10px', borderRadius: '8px', background: 'rgba(0,0,0,.78)', color: '#b6ffb0', font: '12px/1.5 ui-monospace, Consolas, monospace', whiteSpace: 'pre', pointerEvents: 'none' });
+document.body.appendChild(diagEl);
+let diagOn = false, diagAcc = 0, diagLast = 0, ftI = 0, drawCalls = 0, drawTris = 0;
+const frameTimes = new Float32Array(120);
+renderer.info.autoReset = false; // tự đặt lại mỗi khung hình để đếm đủ cả các lượt vẽ của bloom
+window.addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); diagOn = !diagOn; diagEl.style.display = diagOn ? 'block' : 'none'; } });
+setInterval(() => { if (joined) send({ t: 'ping', c: performance.now() }); }, 2000);
+function diagFrame(now, dt) {
+  if (diagLast) frameTimes[ftI++ % 120] = now - diagLast;
+  diagLast = now;
+  drawCalls = renderer.info.render.calls; drawTris = renderer.info.render.triangles;
+  renderer.info.reset();
+  if (!diagOn) return;
+  diagAcc += dt;
+  if (diagAcc < 0.5) return;
+  diagAcc = 0;
+  const n = Math.min(ftI, 120), a = Array.from(frameTimes.subarray(0, n)).sort((x, y) => x - y);
+  const avg = a.reduce((s, v) => s + v, 0) / Math.max(1, n), p95 = a[Math.floor(n * 0.95)] || 0, slow = a.filter((v) => v > 33).length;
+  const g = netStat.snapGaps, gAvg = g.reduce((s, v) => s + v, 0) / Math.max(1, g.length), gMax = Math.max(0, ...g);
+  diagEl.textContent =
+    `FPS ${(1000 / Math.max(1, avg)).toFixed(0)}  khung TB ${avg.toFixed(1)} ms  p95 ${p95.toFixed(1)} ms  khung >33ms: ${slow}/${n}\n` +
+    `ping ${netStat.ping} ms${SIM_LAG || SIM_JIT ? `  (giả lập +${SIM_LAG}±${SIM_JIT} ms mỗi chiều)` : ''}\n` +
+    `gói snapshot: cách nhau TB ${(gAvg * 1000).toFixed(0)} ms, lớn nhất ${(gMax * 1000).toFixed(0)} ms\n` +
+    `sửa vị trí: ${netStat.corr.length} lần / 60 giây   lệch hiển thị ${Math.hypot(visOffX, visOffZ).toFixed(2)} m\n` +
+    `lệnh vẽ ${drawCalls}  tam giác ${(drawTris / 1000).toFixed(0)}k  chất lượng ${quality}  pixelRatio ${pixelRatio}\n` +
+    `người/NPC: ${ents.size}  lệnh chờ xác nhận: ${inputHist.length}`;
+}
+// Cho phép kiểm thử tự động đọc số đo
+window.__diag = () => ({ ping: netStat.ping, corr60: netStat.corr.length, visOff: Math.hypot(visOffX, visOffZ), pending: inputHist.length, drawCalls, drawTris, frames: Array.from(frameTimes.subarray(0, Math.min(ftI, 120))), snapGaps: netStat.snapGaps.slice(), x: me.x, z: me.z });
+
 // ===================== Vòng lặp vẽ =====================
 const camFocus = new THREE.Vector3(0, 0, 0);
 const NIGHT_FOG = new THREE.Color(0x070b18);
@@ -1299,6 +1359,7 @@ function frame(now) {
   sneaking = false;
   if (joined) {
     const v = inputVec();
+    sendInputIfChanged(v);
     const canMove = me.jail <= 0 && !me.stun && v.moving;
     if (canMove) {
       const speed = moveSpeed({ boost: me.boost, en: me.en, sneak: v.sneak, run: v.run });
@@ -1309,7 +1370,8 @@ function frame(now) {
     }
     if (aiming) updateAim(); // ngắm: cập nhật vạch ngắm và quay mặt nhân vật về hướng ngắm
     const mine = ents.get(myId.v);
-    if (mine) { mine.x = me.x; mine.z = me.z; mine.try = me.ry; mine.flags = (me.jail > 0 ? 1 : 0) | (snap && snap.me.hold ? 2 : 0) | (minigameActive() ? 2 : 0) | (me.boost > 0 ? 8 : 0) | (me.codeFlags || 0); }
+    { const kd = Math.exp(-dt * 9); visOffX *= kd; visOffZ *= kd; }
+    if (mine) { mine.x = me.x + visOffX; mine.z = me.z + visOffZ; mine.try = me.ry; mine.flags = (me.jail > 0 ? 1 : 0) | (snap && snap.me.hold ? 2 : 0) | (minigameActive() ? 2 : 0) | (me.boost > 0 ? 8 : 0) | (me.codeFlags || 0); }
     if (moving && !sneaking) { const rn = isRunning({ run: v.run, sneak: v.sneak, en: me.en }); stepT -= dt; if (stepT <= 0) { stepT = rn || me.boost > 0 ? 0.22 : 0.33; sfx('step', rn ? 0.5 : 0.35, 0); } }
   }
 
@@ -1436,8 +1498,8 @@ function frame(now) {
 
   // Camera cố định: góc nhìn luôn giống nhau, chỉ điểm bám theo người chơi được làm mượt (không bị lệch góc khi chạy)
   const k = 1 - Math.exp(-dt * 12);
-  camFocus.x += (me.x - camFocus.x) * k;
-  camFocus.z += (me.z - camFocus.z) * k;
+  camFocus.x += (me.x + visOffX - camFocus.x) * k; // bám theo vị trí hiển thị (đã làm mượt) của nhân vật
+  camFocus.z += (me.z + visOffZ - camFocus.z) * k;
   if (Math.hypot(me.x - camFocus.x, me.z - camFocus.z) > 6) { camFocus.x = me.x; camFocus.z = me.z; }
   const sx = shake ? (Math.random() - 0.5) * shake * 1.2 : 0, sz = shake ? (Math.random() - 0.5) * shake * 1.2 : 0;
   if (camMode === 'third') { // ngôi thứ ba: camera quay quanh nhân vật theo yaw/pitch người chơi kéo
@@ -1463,7 +1525,8 @@ function frame(now) {
   sun.position.set(fx - Math.cos(arc) * 30, Math.max(10, Math.sin(arc) * 48), fz + 16);
 
   if (composer) composer.render(); else renderer.render(scene, camera);
-  if (joined && (mmFrame++ & 1) === 0) drawMinimap(time);
+  if (joined && time - mmLastDraw >= (mmBig ? 0.066 : 0.1)) { mmLastDraw = time; drawMinimap(time); } // 10 lần/giây là đủ mượt cho bản đồ nhỏ
+  diagFrame(now, dt);
 }
 resize();
 requestAnimationFrame(frame);

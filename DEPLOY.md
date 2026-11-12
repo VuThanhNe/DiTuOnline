@@ -39,6 +39,8 @@ Nghĩa là gói miễn phí nào có hạn mức băng thông thấp sẽ cạn 
 4. Chờ build xong (vài phút). Địa chỉ có dạng `https://di-tu-online.onrender.com`. Gửi link đó cho bạn bè.
 5. Kiểm tra: mở `/healthz` (trả `ok`) và `/status` (trả JSON `{"online":0,"capacity":30,"queue":0}`).
 
+**Chọn vùng Singapore.** Server càng gần người chơi thì càng ít trễ. `render.yaml` đã khai báo `region: singapore`, nhưng vùng chỉ được chọn **lúc tạo dịch vụ**. Nếu dịch vụ hiện tại đang ở vùng khác (xem trong trang Settings của dịch vụ), hãy tạo dịch vụ mới (Blueprint, hoặc Web Service rồi chọn Region = Singapore) và xoá dịch vụ cũ. Kiểm tra độ trễ: vào game, nhấn **F3**, xem dòng `ping`.
+
 **Giới hạn của gói miễn phí Render (theo tài liệu của Render):**
 - Dịch vụ **ngủ sau 15 phút không có lưu lượng**; tin nhắn WebSocket của kết nối đang mở **có tính là lưu lượng**. Game gửi dữ liệu liên tục khi còn người chơi nên đang chơi thì không ngủ; hết người chơi 15 phút là ngủ. Người vào đầu tiên sau đó phải chờ khoảng 1 phút (game đã tự hiện thông báo "máy chủ đang thức dậy" và tự thử lại).
 - 750 giờ chạy mỗi tháng cho cả workspace (dịch vụ ngủ không tốn giờ).

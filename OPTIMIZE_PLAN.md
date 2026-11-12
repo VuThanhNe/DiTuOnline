@@ -2,6 +2,16 @@
 
 Tài liệu này là **bản giao việc** cho một model/lập trình viên khác. Đọc hết phần 1–3 trước khi làm. Làm theo thứ tự ở phần 4; mỗi việc có tiêu chí nghiệm thu đo được.
 
+## 0. Trạng thái (cập nhật 2026-11-12, sau đợt tối ưu đầu tiên)
+
+**Đã làm xong** (chi tiết ở `CONTEXT.md`, mục "Đợt 9"): M1, M2, M3, N2, N3, N5 (phần gửi ngay khi đổi điều khiển), L1, L3, R2, và một phần của C3 (dùng lại object tư thế), C4 (minimap 10 lần/giây). N1 đã sửa `render.yaml` nhưng **chủ dự án phải tạo lại dịch vụ ở Singapore**. R1 hoá ra đã hoạt động sẵn (vào lại bằng `sid` lạ thì được cho vào như người mới).
+
+**Còn lại cho người làm tiếp:** M4 (đo số nền trên Render thật), N4, N6, N7, S1, S2, S3, C1, C2, phần còn lại của C3 và C4, C5, C6, L2 (cần `ffmpeg`), L4, R3, R4.
+
+**Công cụ đã có để đo:** phím **F3** trong game (FPS, ping, khoảng cách gói, số lần bị sửa vị trí, số lệnh vẽ), tham số `?lag=120&jitter=30` (giả lập mạng trễ), `window.__diag()` (đọc số đo bằng script), `/status` (số đo nhịp server), `npm run test:netcode` (mô phỏng mạng trễ với server thật, so thuật toán cũ và mới).
+
+**Lưu ý khi đo bằng trình duyệt tự động:** nếu cửa sổ bị che/thu nhỏ, trình duyệt giới hạn `requestAnimationFrame` còn 1 lần/giây và mọi số đo sẽ sai. Kiểm tra FPS trên bảng F3 trước khi tin số đo.
+
 ## 1. Bối cảnh
 
 - Game: "Đi Tù Online", 3D nhiều người chơi trên trình duyệt. Node.js + `ws` (server quyết định mọi thứ), Three.js (client). Đọc `CONTEXT.md` để nắm kiến trúc và lịch sử thay đổi, `DEPLOY.md` để nắm cách deploy.

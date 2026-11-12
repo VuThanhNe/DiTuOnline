@@ -1,6 +1,7 @@
 // Máy chủ HTTP (phục vụ file tĩnh) + WebSocket (trò chơi realtime).
 import http from 'node:http';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -30,6 +31,27 @@ const ROUTES = [
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 
+// Bộ nhớ đệm bản nén: khoá theo file + kích thước + thời điểm sửa + kiểu nén (file đổi thì tự nén lại)
+const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.json', '.svg']);
+const zcache = new Map();
+function compressed(file, st, enc, cb) {
+  const key = `${file}|${st.size}|${st.mtimeMs}|${enc}`;
+  const hit = zcache.get(key);
+  if (hit) return hit.then((b) => cb(null, b), cb);
+  const p = new Promise((resolve, reject) => {
+    fs.readFile(file, (err, data) => {
+      if (err) return reject(err);
+      const done = (e, out) => (e ? reject(e) : resolve(out));
+      if (enc === 'br') zlib.brotliCompress(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } }, done);
+      else zlib.gzip(data, { level: 6 }, done);
+    });
+  });
+  p.catch(() => zcache.delete(key));
+  zcache.set(key, p);
+  if (zcache.size > 200) zcache.delete(zcache.keys().next().value);
+  p.then((b) => cb(null, b), cb);
+}
+
 function handleHttp(req, res) {
   let url, pathname;
   try {
@@ -39,7 +61,7 @@ function handleHttp(req, res) {
   if (pathname.includes('\0')) { res.writeHead(400); return res.end('Bad request'); }
   if (pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
   if (pathname === '/healthz') { res.writeHead(200); return res.end('ok'); }
-  if (pathname === '/status') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify(lobby.status())); } // số người online / sức chứa / hàng chờ
+  if (pathname === '/status') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ ...lobby.status(), ...tickStats.last })); } // số người online / sức chứa / hàng chờ
   if (pathname === '/') pathname = '/index.html';
   for (const [prefix, dir, cache] of ROUTES) {
     if (!pathname.startsWith(prefix)) continue;
@@ -48,7 +70,24 @@ function handleHttp(req, res) {
     // Gửi theo luồng (không đọc cả file vào RAM) và hỗ trợ Range: cần cho file nhạc lớn, Safari/iOS bắt buộc có Range mới phát được audio
     return fs.stat(file, (err, st) => {
       if (err || !st.isFile()) { res.writeHead(404); return res.end('Not found'); }
-      const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': cache, 'Accept-Ranges': 'bytes' };
+      const ext = path.extname(file);
+      const etag = `W/"${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}"`;
+      const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, 'Accept-Ranges': 'bytes', ETag: etag };
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, 'Cache-Control': cache }); return res.end(); } // trình duyệt đã có bản mới nhất
+      // File văn bản (js/css/html/json): gửi bản nén brotli/gzip, nén một lần rồi giữ trong bộ nhớ
+      if (COMPRESSIBLE.has(ext) && !req.headers.range && st.size > 1024 && st.size < 4 * 1024 * 1024) {
+        const ae = String(req.headers['accept-encoding'] || '');
+        const enc = /\bbr\b/.test(ae) ? 'br' : /\bgzip\b/.test(ae) ? 'gzip' : null;
+        headers.Vary = 'Accept-Encoding';
+        if (enc) {
+          return compressed(file, st, enc, (e2, buf) => {
+            if (e2) { res.writeHead(500); return res.end(); }
+            headers['Content-Encoding'] = enc; headers['Content-Length'] = buf.length; delete headers['Accept-Ranges'];
+            res.writeHead(200, headers);
+            res.end(req.method === 'HEAD' ? undefined : buf);
+          });
+        }
+      }
       let start = 0, end = st.size - 1, code = 200;
       const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
       if (m && (m[1] || m[2]) && st.size > 0) {
@@ -84,13 +123,27 @@ const lobby = new Lobby({
   afkSecs: Number(process.env.AFK_SECS) || 180,
 });
 
+// Vòng lặp 30 nhịp/giây. Nếu máy chủ bị khựng (CPU dùng chung), thời gian đã trôi được chạy bù bằng nhiều bước con ngắn
+// (tối đa 0,25 giây mỗi lần) thay vì bị cắt bỏ: thời gian trong game không bị "mất" nên người chơi không bị kéo giật về.
+const TICK_MS = 1000 / 30;
+const tickStats = { n: 0, sum: 0, max: 0, lagSum: 0, lagMax: 0, last: { tickAvgMs: 0, tickMaxMs: 0, loopLagMs: 0, loopLagMaxMs: 0 } };
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const elapsed = now - last;
   last = now;
-  try { lobby.tick(dt); } catch (e) { console.error('[lobby]', e); }
-}, 1000 / 30);
+  let dt = Math.min(0.25, elapsed / 1000);
+  const t0 = process.hrtime.bigint();
+  while (dt > 1e-6) {
+    const step = Math.min(dt, 0.05);
+    try { lobby.tick(step); } catch (e) { console.error('[lobby]', e); }
+    dt -= step;
+  }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6, lag = Math.max(0, elapsed - TICK_MS);
+  tickStats.n++; tickStats.sum += ms; tickStats.lagSum += lag;
+  if (ms > tickStats.max) tickStats.max = ms;
+  if (lag > tickStats.lagMax) tickStats.lagMax = lag;
+}, TICK_MS);
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
 const ipCount = new Map();
@@ -128,6 +181,7 @@ wss.on('connection', (ws, req) => {
       else { ws.send(JSON.stringify({ t: 'queuefull' })); ws.close(1013, 'Queue full'); }
       return;
     }
+    if (msg.t === 'ping') { if (Number.isFinite(msg.c)) ws.send(JSON.stringify({ t: 'pong', c: msg.c })); return; } // đo độ trễ; không tính là thao tác chơi
     if (!player) return;
     if (msg.t !== 'in') room.touch(player); // mọi thao tác ngoài gói input liên tục đều tính là đang chơi (chống bị coi là AFK)
     if (msg.t === 'in') room.setInput(player, msg);
@@ -155,7 +209,12 @@ wss.on('connection', (ws, req) => {
 
 // Ghi log băng thông mỗi phút (để biết gói miễn phí có đủ không)
 setInterval(() => {
+  if (tickStats.n) {
+    tickStats.last = { tickAvgMs: +(tickStats.sum / tickStats.n).toFixed(2), tickMaxMs: +tickStats.max.toFixed(1), loopLagMs: +(tickStats.lagSum / tickStats.n).toFixed(1), loopLagMaxMs: +tickStats.lagMax.toFixed(0) };
+    tickStats.n = 0; tickStats.sum = 0; tickStats.max = 0; tickStats.lagSum = 0; tickStats.lagMax = 0;
+  }
   const st = lobby.status();
+  if (st.online > 0) console.log(`[nhịp] xử lý TB ${tickStats.last.tickAvgMs} ms, lâu nhất ${tickStats.last.tickMaxMs} ms; trễ vòng lặp TB ${tickStats.last.loopLagMs} ms, lớn nhất ${tickStats.last.loopLagMaxMs} ms`);
   if (st.online > 0 || st.queue > 0) console.log(`[sảnh] ${st.online}/${st.capacity} người chơi, ${st.queue} người đang chờ`);
   for (const r of lobby.rooms) {
     if (r.size > 0) {
@@ -175,3 +234,16 @@ setInterval(() => {
 }, 20000);
 
 server.listen(PORT, () => console.log(`Đi Tù Online chạy tại http://localhost:${PORT}`));
+
+// Tắt máy êm: Render gửi SIGTERM mỗi lần deploy lại. Báo cho người chơi rồi đóng kết nối sạch sẽ.
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('[tắt máy] đang đóng kết nối...');
+  for (const r of lobby.rooms) r.sys('⚠️ Máy chủ đang khởi động lại để cập nhật. Vui lòng tải lại trang sau khoảng 1 phút (tiến trình của ván này sẽ mất).');
+  setTimeout(() => { for (const ws of wss.clients) { try { ws.close(1012, 'Server restart'); } catch { /* bỏ qua */ } } server.close(); }, 800);
+  setTimeout(() => process.exit(0), 2500).unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

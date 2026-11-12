@@ -5,6 +5,7 @@ services:
     name: di-tu-online
     runtime: node
     plan: free
+    region: singapore # gần người chơi Việt Nam; vùng chỉ chọn được lúc TẠO dịch vụ
     buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz

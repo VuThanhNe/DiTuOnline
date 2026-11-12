@@ -10,6 +10,7 @@ import { rnd, pick, angDiff, cleanChat } from './util.js';
 
 const r2 = (n) => Math.round(n * 100) / 100;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const INPUT_SLOT = 0.05; // giây: client gửi một lệnh điều khiển mỗi 50 ms
 const ESCAPE_SCORE = 450; // điểm xếp hạng cho mỗi lần vượt ngục thành công
 const STATION_BY_ID = new Map(STATIONS.map((s) => [s.id, s]));
 const SHOP_BY_ID = new Map(SHOP.map((s) => [s.id, s]));
@@ -190,15 +191,29 @@ export class Room {
     if (this.players.size === 0) this.emptySince = Date.now();
   }
 
+  // Lệnh điều khiển được áp dụng ngay khi nhận. Client gửi một lệnh mỗi 50 ms (INPUT_SLOT), nên lệnh số seq ứng với thời điểm
+  // seq x 50 ms trên "dòng thời gian của client". p.tl = server đã mô phỏng được bao lâu kể từ đầu ô của lệnh hiện tại.
+  // Khi lệnh kế đến muộn (mạng rung), phần mô phỏng lố được mang sang ô của lệnh sau thay vì bị quên; client nhận p.tl qua `ia`
+  // và chỉ chạy lại đúng phần còn thiếu (shared/predict.js). Nhờ vậy gói đến sớm/muộn không làm nhân vật bị kéo giật.
   setInput(p, msg) {
     const c = (v) => (Number.isFinite(v) ? clamp(v, -1, 1) : 0);
+    const seq = msg.seq | 0;
+    // Mốc thời gian phía client của lệnh (ms). Chỉ dùng để ghi sổ cho việc đối chiếu vị trí của CHÍNH người đó, không ảnh hưởng tới di chuyển,
+    // nên client khai sai cũng chỉ tự làm mình bị giật. Client cũ không gửi ct thì coi như các lệnh cách nhau đúng 50 ms.
+    const ct = Number.isFinite(msg.ct) ? msg.ct : seq * INPUT_SLOT * 1000;
+    const ahead = p.inCt === undefined ? 0 : (ct - p.inCt) / 1000; // lệnh mới nằm sau lệnh cũ bao nhiêu giây trên dòng thời gian của client
+    p.inCt = ct;
+    // p.tl có thể ÂM (lệnh đến sớm hơn nhịp 50 ms: server mô phỏng chưa đủ ô trước) hoặc dương (đến muộn: mô phỏng lố sang ô này).
+    // Nhân 0,9 để mốc tự trôi dần về độ trễ trung bình hiện tại, không bị neo mãi vào gói đầu tiên.
+    const tl = ((p.tl || 0) - ahead) * 0.9;
+    p.tl = seq > (p.inSeq | 0) && ahead > 0 && ahead < 0.5 && Math.abs(tl) < 0.3 ? tl : 0; // số thứ tự bất thường (vào lại, tràn số) hoặc lệch quá xa: bắt đầu lại
     p.mx = c(msg.mx);
     p.mz = c(msg.mz);
     p.act = !!msg.act;
     p.sneak = !!msg.sneak;
     p.run = !!msg.run;
     if (p.mx || p.mz || p.act) p.activeAt = Date.now(); // có thao tác thật (không tính gói input trống gửi liên tục)
-    p.inSeq = msg.seq | 0;
+    p.inSeq = seq;
     p.lastIn = Date.now();
   }
 
@@ -424,6 +439,7 @@ export class Room {
   }
 
   updatePlayer(p, dt) {
+    p.tl = (p.tl || 0) + dt; // đã mô phỏng thêm dt giây với lệnh hiện tại
     if (p.touchCd > 0) p.touchCd -= dt;
     if (p.stun > 0) p.stun -= dt;
     if (p.boost > 0) p.boost -= dt;
@@ -447,7 +463,7 @@ export class Room {
       return;
     }
     if (p.hp < RULES.hpMax && p.hurtT <= 0) p.hp = Math.min(RULES.hpMax, p.hp + RULES.hpRegen * dt);
-    if (Date.now() - p.lastIn > 400) { p.mx = 0; p.mz = 0; p.act = false; }
+    if (Date.now() - p.lastIn > 1000) { p.mx = 0; p.mz = 0; p.act = false; } // 1 giây (trước 0,4 giây): mạng nghẽn ngắn không làm nhân vật khựng lại
 
     // đang chơi minigame: đứng yên, vẫn gây tiếng động
     if (p.mg) {
@@ -1137,7 +1153,7 @@ export class Room {
         me: {
           pts: p.pts, jail: Math.ceil(p.jail), det: r2(p.detect),
           hold: p.hold && p.hold.need ? r2(p.hold.t / p.hold.need) : (p.hold ? -1 : 0),
-          seq: p.inSeq, x: r2(p.x), z: r2(p.z),
+          seq: p.inSeq, ia: Math.round((p.tl || 0) * 1000), x: r2(p.x), z: r2(p.z), // ia: số ms lệnh seq đã được áp dụng
           hp: Math.round(p.hp), en: Math.round(p.en), chased: p.chased ? 1 : 0, stun: p.stun > 0 ? 1 : 0,
           warn: p.warn, fc: p.fenceCuts,
         },

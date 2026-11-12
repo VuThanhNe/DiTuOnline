@@ -57,4 +57,5 @@ Nhạc nền: `public/music/day.mp3` (ban ngày) và `public/music/night.mp3` (g
 npm run test:patrol
 npm run test:bots
 npm run test:lobby
+npm run test:netcode   # mô phỏng mạng trễ, kiểm tra nhân vật không bị kéo giật
 ```
