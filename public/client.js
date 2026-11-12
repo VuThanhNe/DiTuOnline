@@ -1365,21 +1365,24 @@ function applyAutoStep(n) {
 }
 function autoQuality(dt) {
   if (qualityPref !== 'auto') return;
-  if (document.hidden) { aqAcc = 0; aqN = 0; return; } // tab ẩn: trình duyệt hãm vẽ, số đo vô nghĩa
+  if (document.hidden || !joined) { aqAcc = 0; aqN = 0; aqGrace = 5; return; } // tab ẩn / chưa vào game: số đo vô nghĩa
   aqAcc += dt; aqN++; // dt bị chặn ở 0,05 s nên máy rất chậm vẫn đo ra ≤ 20 FPS
   if (aqAcc < 1) return;
   const fps = aqN / aqAcc; aqAcc = 0; aqN = 0;
+  if (aqGrace > 0) { aqGrace--; return; } // 5 giây đầu sau khi vào game: dựng thế giới, biên dịch shader nên chậm tạm thời
+  // màn hình bị giới hạn ~30 Hz (tiết kiệm pin): ổn định gần 30 thì là trần của màn hình, không phải máy yếu
+  if (fps > 26 && fps < 34 && ++aqCap >= 3) { aqLow = 0; return; } else if (fps < 26 || fps >= 34) aqCap = 0;
   if (fps < 40) { aqLow++; aqHigh = 0; } else if (fps > 57) { aqHigh++; aqLow = 0; } else { aqLow = 0; aqHigh = 0; }
   if (aqLow >= 3 && autoStep < AUTO_MAX) { // vừa nâng rồi lại tụt thì chờ lâu hơn mới thử nâng tiếp
     if (autoStepUpAt && performance.now() - autoStepUpAt < 30000) aqUpWait = Math.min(60, aqUpWait * 2);
     applyAutoStep(autoStep + 1); aqLow = 0;
   } else if (aqHigh >= aqUpWait && autoStep > 0) { applyAutoStep(autoStep - 1); autoStepUpAt = performance.now(); aqHigh = 0; }
 }
-let autoStepUpAt = 0;
+let autoStepUpAt = 0, aqGrace = 5, aqCap = 0;
 
 const camFocus = new THREE.Vector3(0, 0, 0);
 const NIGHT_FOG = new THREE.Color(0x070b18);
-let coneFrame = 0, last = performance.now(), time = 0, nightK = 0, evK = 0, stepT = 0, fpsAcc = 0, fpsN = 0, sneaking = false;
+let coneFrame = 0, last = performance.now(), time = 0, nightK = 0, evK = 0, stepT = 0, sneaking = false;
 const NIGHT_BG = new THREE.Color(0x070b18), RAIN_GREY = new THREE.Color(0x6f7782);
 const hemiSky = new THREE.Color(0xcfe6ff), hemiNight = new THREE.Color(0x5a72b8);
 

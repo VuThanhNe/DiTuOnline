@@ -2,11 +2,13 @@
 
 Tài liệu này là **bản giao việc** cho một model/lập trình viên khác. Đọc hết phần 1–3 trước khi làm. Làm theo thứ tự ở phần 4; mỗi việc có tiêu chí nghiệm thu đo được.
 
-## 0. Trạng thái (cập nhật 2026-11-12, sau đợt tối ưu đầu tiên)
+## 0. Trạng thái (cập nhật 2026-11-12, sau Đợt 10)
 
-**Đã làm xong** (chi tiết ở `CONTEXT.md`, mục "Đợt 9"): M1, M2, M3, N2, N3, N5 (phần gửi ngay khi đổi điều khiển), L1, L3, R2, và một phần của C3 (dùng lại object tư thế), C4 (minimap 10 lần/giây). N1 đã sửa `render.yaml` nhưng **chủ dự án phải tạo lại dịch vụ ở Singapore**. R1 hoá ra đã hoạt động sẵn (vào lại bằng `sid` lạ thì được cho vào như người mới).
+**Đã làm xong** (chi tiết ở `CONTEXT.md`, mục "Đợt 9" và "Đợt 10"): M1, M2, M3, N2, N3, N5, N7, S1, C1, C3, C4, C6, L1, L3, R1, R2; S2 làm một phần (`goalFor` tính 4 lần/giây). N1 đã sửa `render.yaml` nhưng **chủ dự án phải tạo lại dịch vụ ở Singapore**.
 
-**Còn lại cho người làm tiếp:** M4 (đo số nền trên Render thật), N4, N6, N7, S1, S2, S3, C1, C2, phần còn lại của C3 và C4, C5, C6, L2 (cần `ffmpeg`), L4, R3, R4.
+**Còn lại cho người làm tiếp:** M4 (đo số nền trên Render thật, cần chủ dự án), N4, N6, phần còn lại của S2 (`nearStation`, `updateDetection`), S3, C2, C5, L2 (cần `ffmpeg`), L4, R3, R4. Thứ tự và ưu tiên: xem [ROADMAP.md](ROADMAP.md).
+
+**Chưa kiểm chứng bằng số đo thật:** FPS/GC của C3, C4, C6 và bộ tự chỉnh chất lượng C1 (trình duyệt tự động bị hãm khung hình). Cần mở F3 trên máy thật, nhớ thử CPU throttle 4x.
 
 **Công cụ đã có để đo:** phím **F3** trong game (FPS, ping, khoảng cách gói, số lần bị sửa vị trí, số lệnh vẽ), tham số `?lag=120&jitter=30` (giả lập mạng trễ), `window.__diag()` (đọc số đo bằng script), `/status` (số đo nhịp server), `npm run test:netcode` (mô phỏng mạng trễ với server thật, so thuật toán cũ và mới).
 

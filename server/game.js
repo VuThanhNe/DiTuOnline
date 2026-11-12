@@ -167,7 +167,7 @@ export class Room {
     p.mx = 0; p.mz = 0; p.act = false; p.sneak = false; p.run = false;
   }
   reattach(p, ws) {
-    p.ws = ws; p.disc = false; p.lastIn = Date.now(); p.lastSlow = null;
+    p.ws = ws; p.disc = false; p.lastIn = Date.now(); p.lastSlow = null; p.goalCache = null;
     this.send(p, this.welcomeMsg(p));
     this.toast(p, 'Đã kết nối lại. Chào mừng trở lại!', 'info');
   }
@@ -1141,17 +1141,15 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.ws && p.ws.bufferedAmount > SNAP_MAX_BUFFERED) continue; // kết nối chậm/nghẽn: bỏ gói này, gói sau thay thế được (tránh dồn bộ nhớ)
       const inRange = (e) => farTurn || (e[1] / 10 - p.x) ** 2 + (e[2] / 10 - p.z) ** 2 <= SNAP_NEAR_R * SNAP_NEAR_R;
-      // phần "ít đổi" (me2) chỉ tính lại 4 lần/giây (goalFor + JSON.stringify khá tốn), các gói còn lại dùng bản cũ
-      if (!p.slowCache || n % 4 === 0) {
-        const near = p.near ? { id: p.near.s.id, label: p.near.label, ok: p.near.ok, why: p.near.why || '' } : null;
-        const sl = {
-          items: p.items, near, jk: p.jailKind, jack: p.jack, labor: p.labor,
-          boost: Math.ceil(Math.max(0, p.boost)), rock: Math.ceil(Math.max(0, p.rockCd)),
-          stock: p.stock, buys: p.bombBuys, goal: this.goalFor(p),
-        };
-        p.slowCache = { slow: sl, key: JSON.stringify(sl) };
-      }
-      const { slow, key } = p.slowCache;
+      // Chỉ `goalFor` (tốn nhất) được cache và tính lại 4 lần/giây; mọi trường khác (lời nhắc trạm, đồ, Jack...) luôn mới nhất.
+      if (!p.goalCache || n % 4 === 0) p.goalCache = this.goalFor(p);
+      const near = p.near ? { id: p.near.s.id, label: p.near.label, ok: p.near.ok, why: p.near.why || '' } : null;
+      const slow = {
+        items: p.items, near, jk: p.jailKind, jack: p.jack, labor: p.labor,
+        boost: Math.ceil(Math.max(0, p.boost)), rock: Math.ceil(Math.max(0, p.rockCd)),
+        stock: p.stock, buys: p.bombBuys, goal: p.goalCache,
+      };
+      const key = JSON.stringify(slow);
       const out = {
         ...base,
         p: allP.filter((e) => e[0] === p.id || inRange(e)),

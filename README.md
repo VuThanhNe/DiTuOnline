@@ -45,10 +45,18 @@ Nhạc nền: `public/music/day.mp3` (ban ngày) và `public/music/night.mp3` (g
 
 Điều khiển: WASD, E (nhấn/giữ), Shift chạy, C đi lén, Esc cài đặt, giữ Q ngắm rồi thả để ném bom, R uống Reddog, giữ T ngắm rồi thả để ném đá, G tặng Jack, N bản đồ lớn, M tắt nhạc, H bật/tắt mũi tên chỉ đường (hiện trong ngày đầu), K hướng dẫn, Enter chat.
 
+## Hiệu năng và chẩn đoán
+
+- Đồ họa mặc định **Tự động**: tự hạ/nâng chất lượng theo FPS lúc đang chơi (tắt bloom, bóng nhỏ hơn, giảm độ phân giải, tắt bóng). Có thể chọn mức cố định trong menu Esc.
+- Phím **F3** hiện bảng chẩn đoán (FPS, ping, số lần bị sửa vị trí, số lệnh vẽ). Thêm `?lag=120&jitter=30` vào địa chỉ để giả lập mạng trễ khi thử trên máy cá nhân.
+- `GET /status` có thêm `tickAvgMs`, `tickMaxMs`, `loopLagMs`, `loopLagMaxMs` (số đo nhịp server). File văn bản được nén brotli/gzip.
+- Danh sách việc tối ưu đã làm và còn lại: [OPTIMIZE_PLAN.md](OPTIMIZE_PLAN.md); lộ trình phát triển: [ROADMAP.md](ROADMAP.md).
+
 ## Cấu trúc
 
 - `shared/map.js`: bản đồ, trạm, chợ đen, luật chơi, cân bằng. `shared/sim.js`, `shared/nav.js`: va chạm, tìm đường.
 - `server/game.js`: logic phòng chơi (server quyết định mọi thứ). `server/index.js`: HTTP và WebSocket.
+- `shared/predict.js`: dự đoán và đối chiếu vị trí (client và test dùng chung).
 - `public/`: `client.js` (HUD, minimap, camera), `world.js` (dựng 3D), `audio.js` (SFX, giọng NPC, nhạc), `minigames.js`.
 
 ## Kiểm thử
