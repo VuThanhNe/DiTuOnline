@@ -299,20 +299,36 @@ let shopOpen = false;
 let lastDet = 0;
 let curEvent = null;
 let sid = '', myName = '', reconnecting = false, reconnectTries = 0;
+let queuedNow = false, kicked = false, rejected = false, connectTries = 0; // hàng chờ khi phòng đầy / bị mời ra / hàng chờ đầy / số lần thử khi máy chủ đang ngủ
 
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 
 // ===================== Mạng =====================
 function connect(name) {
   myName = name;
+  kicked = false;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const sock = new WebSocket(`${proto}://${location.host}/ws`);
   ws = sock;
-  if (!reconnecting) { $('connmsg').textContent = 'Đang kết nối...'; $('enter').disabled = true; }
-  sock.onopen = () => sock.send(JSON.stringify({ t: 'join', name, sid }));
+  let opened = false;
+  if (!reconnecting && !connectTries) { $('connmsg').textContent = 'Đang kết nối...'; $('enter').disabled = true; }
+  // máy chủ miễn phí có thể đang "ngủ" và mất tới ~1 phút để thức dậy
+  const wake = setTimeout(() => { if (ws === sock && !opened && !reconnecting) $('connmsg').textContent = 'Máy chủ miễn phí đang thức dậy, có thể mất tới 1 phút. Xin đợi...'; }, 6000);
+  sock.onopen = () => { opened = true; clearTimeout(wake); connectTries = 0; sock.send(JSON.stringify({ t: 'join', name, sid })); };
   sock.onmessage = (ev) => { try { onMsg(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
   sock.onclose = () => {
+    clearTimeout(wake);
     if (ws !== sock) return;
+    if (kicked) return; // bị mời ra vì AFK: đã có thông báo, không tự vào lại
+    if (rejected) { rejected = false; $('enter').disabled = false; return; } // hàng chờ đầy: đã có thông báo
+    if (queuedNow && !joined) { queuedNow = false; $('leaveq').classList.add('hidden'); document.title = 'Đi Tù Online'; $('connmsg').textContent = 'Mất kết nối khi đang chờ. Hãy bấm Nhập trại để xếp hàng lại.'; $('enter').disabled = false; return; }
+    if (!opened && !joined && !reconnecting && connectTries < 4) { // chưa kết nối được lần nào: thử lại vài lần (máy chủ có thể đang thức dậy)
+      connectTries++;
+      $('connmsg').textContent = `Đang đánh thức máy chủ... (lần thử ${connectTries + 1}/5)`;
+      setTimeout(() => { if (ws === sock) connect(myName); }, 3000);
+      return;
+    }
+    connectTries = 0;
     if (joined || reconnecting) {
       // tự động thử vào lại (server giữ chỗ 60 giây)
       joined = false;
@@ -339,7 +355,18 @@ const NPC_NAME = { guard: 'Quản giáo', inmate: 'Tù nhân', dealer: 'Tày Sca
 
 function onMsg(m) {
   switch (m.t) {
+    case 'queue': { // phòng đầy: đang xếp hàng chờ, server báo vị trí
+      queuedNow = true;
+      const txt = `Phòng đang đầy (${m.online}/${m.cap} người chơi). Bạn là người thứ ${m.pos} trong hàng chờ (${m.total} người đang chờ). Hãy để trang này mở: bạn sẽ được vào tự động khi có chỗ.`;
+      document.title = `(#${m.pos}) Đi Tù Online - hàng chờ`;
+      if (reconnecting) showBanner(`Phòng đang đầy. Bạn ở vị trí #${m.pos} trong hàng chờ,\nsẽ được vào lại tự động.`, 'escape', 0);
+      else { $('connmsg').textContent = txt; $('leaveq').classList.remove('hidden'); $('enter').disabled = true; }
+      break;
+    }
+    case 'queuefull': rejected = true; $('connmsg').textContent = 'Hàng chờ đang đầy. Hãy thử lại sau ít phút.'; break;
+    case 'kicked': kicked = true; joined = false; reconnecting = false; showBanner('Bạn bị mời ra khỏi phòng vì đứng yên quá lâu\nkhi có người đang chờ. Tải lại trang để xếp hàng vào lại.', 'escape', 0); break;
     case 'welcome': {
+      if (queuedNow) { queuedNow = false; $('leaveq').classList.add('hidden'); document.title = 'Đi Tù Online'; setTimeout(() => { toast('🎉 Đến lượt bạn! Chúc chơi vui.', 'good'); sfx('good', 0.8); }, 400); }
       resetEntities();
       sid = m.sid || sid;
       if (reconnecting) { reconnecting = false; reconnectTries = 0; $('banner').classList.add('hidden'); }
@@ -972,7 +999,23 @@ setInterval(() => {
   ws.send(JSON.stringify({ t: 'in', mx, mz, act: v.act, sneak: v.sneak, run: v.run, seq }));
 }, 50);
 
-$('enter').addEventListener('click', () => { initAudio(); connect($('name').value); try { localStorage.setItem('ditu-name', $('name').value); } catch { /* bỏ qua */ } });
+// Rời hàng chờ
+$('leaveq').addEventListener('click', () => {
+  const s = ws; ws = null; queuedNow = false;
+  if (s) s.close();
+  $('leaveq').classList.add('hidden'); $('enter').disabled = false; $('connmsg').textContent = ''; document.title = 'Đi Tù Online';
+});
+// Số người đang chơi / hàng chờ ở màn hình đầu
+async function pollStatus() {
+  if (joined) return;
+  try {
+    const s = await (await fetch('/status', { cache: 'no-store' })).json();
+    $('srvstat').textContent = `Đang chơi: ${s.online}/${s.capacity}${s.queue ? ` · đang chờ: ${s.queue}` : ''}`;
+  } catch { /* máy chủ chưa sẵn sàng: bỏ qua */ }
+}
+pollStatus(); setInterval(pollStatus, 8000);
+
+$('enter').addEventListener('click', () => { connectTries = 0; initAudio(); connect($('name').value); try { localStorage.setItem('ditu-name', $('name').value); } catch { /* bỏ qua */ } });
 try { $('name').value = localStorage.getItem('ditu-name') || ''; } catch { /* bỏ qua */ }
 if (isMuted()) $('soundbtn').textContent = '🔇';
 document.addEventListener('pointerdown', () => initAudioIfStarted(), { once: true });

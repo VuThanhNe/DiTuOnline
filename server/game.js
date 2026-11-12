@@ -138,7 +138,7 @@ export class Room {
       hp: RULES.hpMax, en: ENERGY.max, jack: 0, labor: 0, stock: { reddog: 0, bomb: 0 }, bombBuys: 0,
       boost: 0, stun: 0, mg: null, hurtT: 0, lastAct: 0,
       sneak: false, rockCd: 0, bombHeat: 0, chased: false, disc: false, discAt: 0,
-      warn: 0, fenceCuts: 0, t0: this.clock, exitNoiseT: 0, run: false, runNoiseT: 0,
+      warn: 0, fenceCuts: 0, t0: this.clock, exitNoiseT: 0, run: false, runNoiseT: 0, activeAt: Date.now(),
     };
     p.sid = randomUUID(); // mật mã an toàn: ai đoán được sid là chiếm được nhân vật đang mất kết nối
     this.players.set(id, p);
@@ -172,6 +172,16 @@ export class Room {
 
   pubPlayer(p) { return { id: p.id, name: p.name, num: p.num, x: r2(p.x), z: r2(p.z), ry: r2(p.ry) }; }
 
+  // Ghi nhận người chơi vừa thao tác (chat, mua đồ, minigame...) để không bị coi là AFK
+  touch(p) { p.activeAt = Date.now(); }
+
+  // Mời một người chơi ra khỏi phòng (vd. đứng im quá lâu khi có hàng chờ)
+  kick(p, why) {
+    this.send(p, { t: 'kicked', why });
+    try { p.ws.close(4000, why); } catch { /* bỏ qua */ }
+    this.removePlayer(p.id);
+  }
+
   removePlayer(id) {
     const p = this.players.get(id);
     if (!p) return;
@@ -187,6 +197,7 @@ export class Room {
     p.act = !!msg.act;
     p.sneak = !!msg.sneak;
     p.run = !!msg.run;
+    if (p.mx || p.mz || p.act) p.activeAt = Date.now(); // có thao tác thật (không tính gói input trống gửi liên tục)
     p.inSeq = msg.seq | 0;
     p.lastIn = Date.now();
   }
@@ -214,7 +225,8 @@ export class Room {
   // ---------- Vòng lặp ----------
   tick(dt) {
     this.clock += dt;
-    for (const p of [...this.players.values()]) if (p.disc && this.clock - p.discAt > RULES.reconnectSecs) this.removePlayer(p.id);
+    const hold = this.holdSecs ?? RULES.reconnectSecs; // sảnh rút ngắn thời gian giữ chỗ khi có hàng chờ
+    for (const p of [...this.players.values()]) if (p.disc && this.clock - p.discAt > hold) this.removePlayer(p.id);
     this.updatePhase(dt);
     this.updateNpcs(dt);
     for (const p of this.players.values()) this.updatePlayer(p, dt);

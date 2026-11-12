@@ -9,7 +9,13 @@ npm install
 npm start          # mở http://localhost:3000
 ```
 
-Yêu cầu Node.js 18 trở lên. Biến môi trường: `PORT`, `TRUST_PROXY=1`, `MAX_CONN_PER_IP`, `DEV=1` (lệnh dịch chuyển/đổi giờ để thử nghiệm).
+Yêu cầu Node.js 18 trở lên. Biến môi trường: `PORT`, `TRUST_PROXY=1`, `MAX_CONN_PER_IP`, `MAX_ROOMS`, `MAX_PLAYERS_PER_ROOM`, `MAX_QUEUE`, `AFK_SECS` (bảng đầy đủ trong DEPLOY.md), `DEV=1` (lệnh dịch chuyển/đổi giờ để thử nghiệm, **không bật khi chạy thật**).
+
+## Deploy miễn phí và hàng chờ
+
+Xem **[DEPLOY.md](DEPLOY.md)**: hướng dẫn từng bước cho Render (dễ nhất) và Oracle Cloud Always Free (chạy 24/7), số liệu tải đã đo cho phòng 30 người, và danh sách biến môi trường.
+
+Sức chứa mặc định là 1 phòng x 30 người (`MAX_ROOMS`, `MAX_PLAYERS_PER_ROOM`). **Phòng đầy thì người mới xếp hàng chờ** (hiện vị trí, tự vào khi có chỗ, có nút Rời hàng chờ). Có người chờ thì người rớt mạng chỉ được giữ chỗ 20 giây và người đứng im quá `AFK_SECS` (180 giây) bị mời ra nhường chỗ. `GET /status` trả `{"online","capacity","queue"}`.
 
 ## Luật chơi
 
@@ -48,4 +54,5 @@ Yêu cầu Node.js 18 trở lên. Biến môi trường: `PORT`, `TRUST_PROXY=1`
 ```bash
 npm run test:patrol
 npm run test:bots
+npm run test:lobby
 ```

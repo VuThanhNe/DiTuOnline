@@ -1,0 +1,26 @@
+# Cấu hình Render (Blueprint): Dashboard -> New -> Blueprint -> chọn repo này.
+# Xem DEPLOY.md để biết giới hạn của gói miễn phí và cách chỉnh.
+services:
+  - type: web
+    name: di-tu-online
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: TRUST_PROXY # đứng sau proxy của Render: lấy IP thật từ X-Forwarded-For
+        value: "1"
+      - key: MAX_ROOMS # 1 phòng x 30 người; hết chỗ thì người mới xếp hàng chờ
+        value: "1"
+      - key: MAX_PLAYERS_PER_ROOM
+        value: "30"
+      - key: MAX_QUEUE
+        value: "100"
+      - key: AFK_SECS # có người chờ thì ai đứng im quá số giây này bị mời ra nhường chỗ
+        value: "180"
+      - key: MAX_CONN_PER_IP # nhiều người chung một mạng (quán net, trường học) thì tăng lên
+        value: "6"

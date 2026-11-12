@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { Room } from './game.js';
+import { Lobby } from './lobby.js';
 import { cleanName } from './util.js';
 import { RULES } from '../shared/map.js';
 
@@ -38,6 +38,7 @@ function handleHttp(req, res) {
   if (pathname.includes('\0')) { res.writeHead(400); return res.end('Bad request'); }
   if (pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
   if (pathname === '/healthz') { res.writeHead(200); return res.end('ok'); }
+  if (pathname === '/status') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify(lobby.status())); } // số người online / sức chứa / hàng chờ
   if (pathname === '/') pathname = '/index.html';
   for (const [prefix, dir, cache] of ROUTES) {
     if (!pathname.startsWith(prefix)) continue;
@@ -60,31 +61,23 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// ---------- Phòng ----------
-const rooms = [];
-let roomSeq = 1;
-function findRoom() {
-  for (const r of rooms) if (r.size < RULES.maxPlayersPerRoom) return r;
-  const r = new Room(roomSeq++);
-  rooms.push(r);
-  return r;
-}
-rooms.push(new Room(roomSeq++));
+// ---------- Sảnh: phòng + hàng chờ ----------
+// MAX_ROOMS x MAX_PLAYERS_PER_ROOM là tổng số người chơi cùng lúc; hết chỗ thì người mới xếp hàng chờ (tối đa MAX_QUEUE người).
+// Mặc định 1 phòng x 30 người: vừa sức máy chủ miễn phí. AFK_SECS: có người chờ thì ai đứng im quá lâu sẽ bị mời ra.
+const lobby = new Lobby({
+  maxRooms: Number(process.env.MAX_ROOMS) || 1,
+  maxPerRoom: Number(process.env.MAX_PLAYERS_PER_ROOM) || RULES.maxPlayersPerRoom,
+  maxQueue: Number(process.env.MAX_QUEUE) || 100,
+  afkSecs: Number(process.env.AFK_SECS) || 180,
+});
 
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  for (let i = rooms.length - 1; i >= 0; i--) {
-    const r = rooms[i];
-    if (i > 0 && r.size === 0 && r.emptySince && now - r.emptySince > 60000) { rooms.splice(i, 1); continue; }
-    if (r.size > 0 || i === 0) {
-      try { r.tick(dt); } catch (e) { console.error(`[tick] phòng ${r.id}:`, e); } // lỗi một phòng không kéo sập phòng khác
-    }
-  }
+  try { lobby.tick(dt); } catch (e) { console.error('[lobby]', e); }
 }, 1000 / 30);
-
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
 const ipCount = new Map();
@@ -98,7 +91,7 @@ wss.on('connection', (ws, req) => {
   if (n > MAX_CONN_PER_IP) { ws.close(1008, 'Too many connections'); return; }
   ipCount.set(ip, n);
 
-  let room = null, player = null;
+  let room = null, player = null, queued = null;
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   let msgCount = 0;
@@ -113,21 +106,18 @@ wss.on('connection', (ws, req) => {
   });
 
   function handleMsg(msg) {
-    if (msg.t === 'join' && !player) {
-      // vào lại sau khi mất kết nối
+    if (msg.t === 'join' && !player && !queued) {
+      // vào lại sau khi mất kết nối (theo sid), vào phòng nếu còn chỗ, hoặc xếp hàng chờ khi phòng đầy
       const sid = typeof msg.sid === 'string' ? msg.sid.slice(0, 40) : '';
-      if (sid) {
-        for (const r of rooms) {
-          for (const p of r.players.values()) if (p.disc && p.sid === sid) { room = r; player = p; }
-        }
-        if (player) room.reattach(player, ws);
-      }
-      if (!player) {
-        room = findRoom();
-        player = room.addPlayer(ws, cleanName(msg.name));
-      }
-    } else if (!player) return;
-    else if (msg.t === 'in') room.setInput(player, msg);
+      const res = lobby.join(ws, cleanName(msg.name), sid, (r, p) => { room = r; player = p; queued = null; });
+      if (res.kind === 'room') { room = res.room; player = res.player; }
+      else if (res.kind === 'queued') queued = res.entry;
+      else { ws.send(JSON.stringify({ t: 'queuefull' })); ws.close(1013, 'Queue full'); }
+      return;
+    }
+    if (!player) return;
+    if (msg.t !== 'in') room.touch(player); // mọi thao tác ngoài gói input liên tục đều tính là đang chơi (chống bị coi là AFK)
+    if (msg.t === 'in') room.setInput(player, msg);
     else if (msg.t === 'chat') room.chat(player, msg.m);
     else if (msg.t === 'mgdone') room.mgDone(player, msg.token, Number(msg.score));
     else if (msg.t === 'mgcancel') room.cancelMg(player, false);
@@ -144,6 +134,7 @@ wss.on('connection', (ws, req) => {
     clearInterval(rl);
     const left = (ipCount.get(ip) || 1) - 1;
     if (left > 0) ipCount.set(ip, left); else ipCount.delete(ip); // không để Map phình dần
+    if (queued) lobby.leave(queued); // đang xếp hàng mà thoát thì nhường vị trí
     if (room && player && player.ws === ws) room.disconnect(player); // giữ chỗ để vào lại
   });
   ws.on('error', () => {});
@@ -151,7 +142,9 @@ wss.on('connection', (ws, req) => {
 
 // Ghi log băng thông mỗi phút (để biết gói miễn phí có đủ không)
 setInterval(() => {
-  for (const r of rooms) {
+  const st = lobby.status();
+  if (st.online > 0 || st.queue > 0) console.log(`[sảnh] ${st.online}/${st.capacity} người chơi, ${st.queue} người đang chờ`);
+  for (const r of lobby.rooms) {
     if (r.size > 0) {
       const kbs = r.bytes / 1024 / 60 / r.size;
       console.log(`[băng thông] phòng ${r.id}: ${r.size} người, ${kbs.toFixed(1)} KB/s/người (~${(kbs * 3.6).toFixed(0)} MB/giờ/người)`);
