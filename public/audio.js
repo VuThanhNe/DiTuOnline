@@ -1,4 +1,4 @@
-﻿// Âm thanh tổng hợp bằng WebAudio (không cần file ngoài): hiệu ứng, giọng NPC (tiếng quát tháo) và nhạc theo từng giờ.
+// Âm thanh: hiệu ứng và giọng NPC tổng hợp bằng WebAudio; nhạc nền là hai file mp3 (public/music/day.mp3, night.mp3).
 let ctx = null, master = null, sfxG = null, musG = null, voxG = null, noiseBuf = null;
 let muted = false;
 try { muted = localStorage.getItem('ditu-muted') === '1'; } catch { /* bỏ qua */ }
@@ -8,7 +8,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 export function initAudio() {
-  if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+  if (ctx) { if (ctx.state === 'suspended') ctx.resume(); if (!curTrack) startMusic(); return; } // nhạc từng bị trình duyệt chặn thì thử phát lại khi người chơi chạm vào trang
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   ctx = new AC();
@@ -19,7 +19,7 @@ export function initAudio() {
   master.connect(comp); comp.connect(ctx.destination);
   sfxG = ctx.createGain(); sfxG.gain.value = 0.85; sfxG.connect(master);
   voxG = ctx.createGain(); voxG.gain.value = 0.7; voxG.connect(master);
-  musG = ctx.createGain(); musG.gain.value = 0.2; musG.connect(master);
+  musG = ctx.createGain(); musG.gain.value = 0.3; musG.connect(master); // nhạc nền (file mp3) nhỏ hơn hiệu ứng
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -204,114 +204,40 @@ export function voiceAt(kind, text, x, z, mx, mz, yell = false) {
   voice(kind, text, Math.pow(1 - d / R, 1.2), (x - mx) / 18, yell);
 }
 
-// ---------- Nhạc nền theo từng giờ ----------
-// Ban ngày: chậm, vui vẻ (âm giai trưởng, giai điệu ngũ cung). Ban đêm: nhanh, dồn dập (giai điệu thứ, bass 16).
-const MAJOR = [0, 2, 4, 7, 9];
-const MINOR = [0, 3, 5, 7, 10, 12, 15];
-const PHRYG = [0, 1, 3, 5, 7, 8, 10];
-const MODES = [
-  { name: 'rollcall', bpm: 92, root: 60, prog: [0, 5, 7, 5], style: 'march' },
-  { name: 'breakfast', bpm: 70, root: 65, prog: [0, 9, 5, 7], style: 'soft' },
-  { name: 'work', bpm: 84, root: 62, prog: [0, 7, 9, 5], style: 'steady' },
-  { name: 'exercise', bpm: 104, root: 60, prog: [0, 5, 7, 0], style: 'bright' },
-  { name: 'dinner', bpm: 68, root: 67, prog: [0, 5, 9, 7], style: 'soft' },
-  { name: 'free', bpm: 64, root: 64, prog: [0, 9, 5, 7], style: 'dream' },
-  { name: 'night', bpm: 150, root: 45, prog: [0, 0, 8, 7], style: 'night' },
-];
-// bậc của âm giai ngũ cung (0..9) cho mỗi nốt đôi (8 nốt/ô nhịp x 4 ô nhịp); null = nghỉ
-const MOTIF = [
-  4, null, 5, 4, 2, null, 4, null,
-  5, null, 7, 5, 4, null, 2, null,
-  4, null, 5, 4, 2, 4, 5, null,
-  7, 5, 4, null, 2, null, 0, null,
-];
-let mode = MODES[1], stepIdx = 0, nextT = 0, melodyPos = 2, musicTimer = null, curPhase = -1;
+// ---------- Nhạc nền: hai file mp3 (ban ngày / ban đêm), phát lặp và chuyển mượt khi đổi giờ ----------
+// File nằm ở public/music/. Bài ban đêm chỉ được tải khi tới giờ tắt đèn (preload = none) để vào game không phải tải trước.
+const TRACKS = { day: '/music/day.mp3', night: '/music/night.mp3' };
+const NIGHT_PHASE_INDEX = 6;
+const players = {};
+let curPhase = -1, curTrack = null;
+
+function getTrack(name) {
+  if (players[name]) return players[name];
+  const el = new Audio();
+  el.src = TRACKS[name]; el.loop = true; el.preload = 'none';
+  const gain = ctx.createGain(); gain.gain.value = 0;
+  ctx.createMediaElementSource(el).connect(gain); gain.connect(musG); // đi qua musG -> master nên nút tắt tiếng và thanh âm lượng vẫn có tác dụng
+  return (players[name] = { el, gain });
+}
+
+function playTrack(name) {
+  if (!ctx || name === curTrack) return;
+  const t = ctx.currentTime, prev = curTrack;
+  if (prev) { // bài cũ nhỏ dần rồi tạm dừng (giữ vị trí để lần sau phát tiếp)
+    const old = players[prev];
+    old.gain.gain.setTargetAtTime(0, t, 0.5);
+    setTimeout(() => { if (curTrack !== prev) old.el.pause(); }, 2500);
+  }
+  curTrack = name;
+  const p = getTrack(name);
+  p.gain.gain.setTargetAtTime(1, t, 0.7);
+  const pr = p.el.play();
+  if (pr && pr.catch) pr.catch(() => { if (curTrack === name) curTrack = null; }); // bị trình duyệt chặn: lần gọi sau sẽ thử lại
+}
 
 export function setPhaseMusic(i) {
-  if (i === curPhase) return;
   curPhase = i;
-  mode = MODES[i] || MODES[1];
-  stepIdx = 0;
-  if (ctx) { // chuyển nhạc: nhỏ xuống rồi lớn lại cho mượt
-    const t = ctx.currentTime;
-    musG.gain.cancelScheduledValues(t);
-    musG.gain.setValueAtTime(musG.gain.value, t);
-    musG.gain.linearRampToValueAtTime(0.02, t + 0.25);
-    musG.gain.linearRampToValueAtTime(mode.style === 'night' ? 0.26 : 0.2, t + 0.9);
-    nextT = Math.max(nextT, t + 0.3);
-  }
+  playTrack(i === NIGHT_PHASE_INDEX ? 'night' : 'day');
 }
 
-function startMusic() {
-  nextT = ctx.currentTime + 0.2;
-  musicTimer = setInterval(() => {
-    if (!ctx || ctx.state !== 'running') { if (ctx) nextT = Math.max(nextT, ctx.currentTime); return; }
-    while (nextT < ctx.currentTime + 0.25) {
-      stepNote(stepIdx++, nextT);
-      nextT += 60 / mode.bpm / 4;
-    }
-  }, 40);
-}
-
-function kick(t, vol = 0.9) { const o = bus(vol, 0, musG); tone(o, { t, f: 140, f2: 42, dur: 0.16, vol: 1 }); }
-function hat(t, vol = 0.3) { const o = bus(vol, 0, musG); noise(o, { t, dur: 0.04, vol: 0.5, type: 'highpass', f: 7000 }); }
-function snare(t, vol = 0.5) { const o = bus(vol, 0, musG); noise(o, { t, dur: 0.14, vol: 0.7, type: 'bandpass', f: 1800, q: 0.6 }); tone(o, { t, f: 190, f2: 120, dur: 0.1, vol: 0.4, type: 'triangle' }); }
-
-function stepNote(i, t) {
-  const m = mode;
-  const bar = Math.floor(i / 16), s = i % 16;
-  const chord = m.prog[bar % m.prog.length];
-  const root = m.root + chord;
-  const sec = 60 / m.bpm;
-
-  if (m.style === 'night') { // dồn dập
-    const scale = (bar % 4 === 3) ? PHRYG : MINOR;
-    // bass 16 liên tục, nhấn theo nhịp
-    const o = bus(s % 4 === 0 ? 0.55 : 0.32, 0, musG);
-    const bnote = root + (s % 8 === 6 ? 12 : s % 8 === 3 ? 7 : 0);
-    tone(o, { t, f: mtof(bnote), type: 'sawtooth', dur: sec / 4 * 0.9, vol: 0.5, a: 0.004 });
-    if (s % 4 === 0) kick(t, 1);
-    if (s % 8 === 4) snare(t, 0.55);
-    if (s % 2 === 0) hat(t, 0.35);
-    // arpeggio cao dồn dập
-    if (s % 2 === 1 || s % 4 === 0) {
-      const deg = scale[(i * 3 + bar) % scale.length];
-      const oo = bus(0.2, 0.3, musG);
-      tone(oo, { t, f: mtof(root + 24 + deg), type: 'square', dur: sec / 4 * 0.6, vol: 0.2, a: 0.003 });
-    }
-    // tiếng nhấn căng thẳng mỗi 2 ô nhịp
-    if (bar % 2 === 1 && s === 0) { const oo = bus(0.4, 0, musG); tone(oo, { t, f: mtof(root + 36), f2: mtof(root + 37), type: 'sawtooth', dur: sec * 1.5, vol: 0.12, a: 0.05 }); }
-    return;
-  }
-
-  // ---- ban ngày: nhẹ nhàng ----
-  const pad = m.style === 'dream' || m.style === 'soft';
-  if (s === 0) { // hợp âm nền
-    const o = bus(0.45, 0, musG);
-    [0, 4, 7].forEach((d, k) => tone(o, { t, f: mtof(root + d), type: 'sine', dur: sec * 3.6, vol: pad ? 0.18 : 0.1, a: 0.25, detune: k * 4 }));
-  }
-  if (s === 0 || s === 8) { const o = bus(0.7, 0, musG); tone(o, { t, f: mtof(root - 12), type: 'sine', dur: sec * 1.6, vol: 0.55, a: 0.01 }); }
-  if (m.style === 'march' && s % 8 === 0) snare(t, s === 0 ? 0.3 : 0.45);
-  if ((m.style === 'bright' || m.style === 'steady') && s % 4 === 0) kick(t, m.style === 'bright' ? 0.5 : 0.35);
-  if ((m.style === 'bright' || m.style === 'steady') && s % 4 === 2) hat(t, 0.25);
-  if (m.style === 'bright' && s % 8 === 4) snare(t, 0.3);
-  // Động cơ (motif) cố định 4 ô nhịp, lặp lại để dễ nhớ; lẫn một ít nốt ngẫu nhiên cho đỡ nhàm
-  const motifStep = MOTIF[(bar % 4) * 8 + (s >> 1)];
-  if (s % 2 === 0 && motifStep !== null && motifStep !== undefined && bar % 8 < 6) {
-    const deg = MAJOR[motifStep % 5] + 12 * Math.floor(motifStep / 5);
-    const o = bus(0.55, 0.15, musG);
-    tone(o, { t, f: mtof(root + 12 + deg), type: 'triangle', dur: sec * 0.8, vol: 0.5, a: 0.008 });
-    tone(o, { t, f: mtof(root + 24 + deg), type: 'sine', dur: sec * 0.5, vol: 0.1, a: 0.01 });
-    melodyPos = motifStep;
-    return;
-  }
-  // giai điệu ngẫu nhiên đi bậc trên âm giai ngũ cung
-  const dense = m.style === 'bright' ? 0.7 : m.style === 'steady' ? 0.55 : 0.4;
-  if (s % 2 === 0 && Math.random() < dense) {
-    melodyPos = clamp(melodyPos + Math.floor(rnd(-2, 3)), 0, 9);
-    const deg = MAJOR[melodyPos % 5] + 12 * Math.floor(melodyPos / 5);
-    const o = bus(0.5, rnd(-0.3, 0.3), musG);
-    tone(o, { t, f: mtof(root + 12 + deg), type: 'triangle', dur: sec * 0.7, vol: 0.42, a: 0.008 });
-    if (m.style === 'dream') tone(o, { t: t + sec * 0.5, f: mtof(root + 24 + deg), type: 'sine', dur: sec * 0.6, vol: 0.12, a: 0.01 });
-  }
-}
+function startMusic() { playTrack(curPhase === NIGHT_PHASE_INDEX ? 'night' : 'day'); }

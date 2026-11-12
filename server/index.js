@@ -16,12 +16,13 @@ const MAX_CONN_PER_IP = Number(process.env.MAX_CONN_PER_IP) || 6;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.json': 'application/json', '.mp3': 'audio/mpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
 };
 const ROUTES = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/build'), 'public, max-age=86400'],
   ['/vendor/three-addons/', path.join(ROOT, 'node_modules/three/examples/jsm'), 'public, max-age=86400'], // EffectComposer, UnrealBloomPass...
   ['/shared/', path.join(ROOT, 'shared'), 'no-cache'],
+  ['/music/', path.join(ROOT, 'public/music'), 'public, max-age=604800'], // nhạc nền: cho trình duyệt giữ lại 7 ngày, khỏi tải lại
   ['/', path.join(ROOT, 'public'), 'no-cache'],
 ];
 
@@ -44,10 +45,22 @@ function handleHttp(req, res) {
     if (!pathname.startsWith(prefix)) continue;
     const file = path.resolve(dir, pathname.slice(prefix.length));
     if (!file.startsWith(dir + path.sep) && file !== dir) break;
-    return fs.readFile(file, (err, data) => {
-      if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': cache });
-      res.end(data);
+    // Gửi theo luồng (không đọc cả file vào RAM) và hỗ trợ Range: cần cho file nhạc lớn, Safari/iOS bắt buộc có Range mới phát được audio
+    return fs.stat(file, (err, st) => {
+      if (err || !st.isFile()) { res.writeHead(404); return res.end('Not found'); }
+      const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': cache, 'Accept-Ranges': 'bytes' };
+      let start = 0, end = st.size - 1, code = 200;
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (m && (m[1] || m[2]) && st.size > 0) {
+        if (m[1]) { start = Number(m[1]); if (m[2]) end = Math.min(end, Number(m[2])); }
+        else start = Math.max(0, st.size - Number(m[2])); // dạng "bytes=-N": N byte cuối
+        if (start > end || start >= st.size) { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
+        code = 206; headers['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
+      }
+      headers['Content-Length'] = st.size ? end - start + 1 : 0;
+      res.writeHead(code, headers);
+      if (req.method === 'HEAD' || !st.size) return res.end();
+      fs.createReadStream(file, { start, end }).on('error', () => res.destroy()).pipe(res);
     });
   }
   res.writeHead(404); res.end('Not found');

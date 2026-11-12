@@ -17,6 +17,8 @@ Xem **[DEPLOY.md](DEPLOY.md)**: hướng dẫn từng bước cho Render (dễ n
 
 Sức chứa mặc định là 1 phòng x 30 người (`MAX_ROOMS`, `MAX_PLAYERS_PER_ROOM`). **Phòng đầy thì người mới xếp hàng chờ** (hiện vị trí, tự vào khi có chỗ, có nút Rời hàng chờ). Có người chờ thì người rớt mạng chỉ được giữ chỗ 20 giây và người đứng im quá `AFK_SECS` (180 giây) bị mời ra nhường chỗ. `GET /status` trả `{"online","capacity","queue"}`.
 
+Nhạc nền: `public/music/day.mp3` (ban ngày) và `public/music/night.mp3` (giờ tắt đèn). Muốn đổi nhạc thì thay hai file này, giữ nguyên tên. Kế hoạch tối ưu hiệu năng: xem [OPTIMIZE_PLAN.md](OPTIMIZE_PLAN.md).
+
 ## Luật chơi
 
 - Một ngày gồm 7 giờ sinh hoạt (điểm danh, bữa sáng, lao động, tập luyện, bữa tối, tự do, tắt đèn).
