@@ -18,7 +18,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 // Chất lượng đồ họa: low (nhẹ nhất) / mid / high (có bloom). Lưu trong localStorage; điện thoại mặc định mid.
 const QUALITY_LEVELS = ['low', 'mid', 'high'];
 let quality = isTouch ? 'mid' : 'high';
-try { const q = localStorage.getItem('ditu-quality'); if (QUALITY_LEVELS.includes(q)) quality = q; } catch { /* bỏ qua */ }
+let qualityPref = 'auto'; // 'auto' = tự hạ/nâng bậc theo FPS (mặc định); hoặc mức cố định do người chơi chọn
+try { const q = localStorage.getItem('ditu-quality'); if (QUALITY_LEVELS.includes(q)) { quality = q; qualityPref = q; } } catch { /* bỏ qua */ }
 const PR_CAP = { low: 1, mid: 1.5, high: 2 };
 let pixelRatio = Math.min(window.devicePixelRatio || 1, PR_CAP[quality]);
 renderer.setPixelRatio(pixelRatio);
@@ -207,6 +208,11 @@ function removeEntity(id) {
   const e = ents.get(id);
   if (!e) return;
   scene.remove(e.group);
+  // giải phóng tài nguyên GPU riêng của thực thể (texture chữ, vật liệu riêng); geometry/vật liệu dùng chung trong cache thì giữ nguyên
+  e.group.traverse((o) => {
+    if (o.isSprite) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+    else if (o.userData && o.userData.own) { if (o.userData.own === 'tex' && o.material.map) o.material.map.dispose(); o.material.dispose(); if (o.geometry.userData.own) o.geometry.dispose(); }
+  });
   ents.delete(id);
 }
 function say(id, text, secs = 5) {
@@ -584,21 +590,25 @@ function drawDial(s) {
   $('dialphase').textContent = PHASES[s.ph].name;
 }
 
+// Chỉ ghi vào DOM khi giá trị đổi (ghi lại cùng giá trị vẫn làm trình duyệt tính lại bố cục 15 lần/giây)
+const hudCache = new Map();
+function setText(id, v) { if (hudCache.get(id) !== v) { hudCache.set(id, v); $(id).textContent = v; } }
+function setWidth(id, v) { const k = `w:${id}`; if (hudCache.get(k) !== v) { hudCache.set(k, v); $(id).style.width = v; } }
 function updateHud(s) {
   drawDial(s);
   const ph = PHASES[s.ph];
-  $('phase').textContent = `Ngày ${s.day} · ${ph.name}`;
-  $('clock').textContent = `Còn ${s.pt} giây`;
-  $('hint').textContent = ph.hint;
+  setText('phase', `Ngày ${s.day} · ${ph.name}`);
+  setText('clock', `Còn ${s.pt} giây`);
+  setText('hint', ph.hint);
   const m = s.me;
   const g = $('goal');
-  if (m.goal && m.jail <= 0) { g.classList.remove('hidden'); g.textContent = `➜ Mục tiêu: ${m.goal.label}`; } else g.classList.add('hidden');
-  $('hpbar').style.width = `${m.hp}%`; $('hptext').textContent = `${m.hp}/${RULES.hpMax}`;
-  $('enbar').style.width = `${m.en}%`; $('entext').textContent = `${m.en}/${ENERGY.max}`;
-  $('ptsbar').style.width = `${Math.min(100, (m.pts / RULES.releasePoints) * 100)}%`;
-  $('ptstext').textContent = `${m.pts}/${RULES.releasePoints}`;
-  $('jack').textContent = `💰 ${m.jack} Jack`;
-  $('labor').textContent = `🔨 ${m.labor} ca lao động`;
+  if (m.goal && m.jail <= 0) { g.classList.remove('hidden'); setText('goal', `➜ Mục tiêu: ${m.goal.label}`); } else g.classList.add('hidden');
+  setWidth('hpbar', `${m.hp}%`); setText('hptext', `${m.hp}/${RULES.hpMax}`);
+  setWidth('enbar', `${m.en}%`); setText('entext', `${m.en}/${ENERGY.max}`);
+  setWidth('ptsbar', `${Math.min(100, (m.pts / RULES.releasePoints) * 100)}%`);
+  setText('ptstext', `${m.pts}/${RULES.releasePoints}`);
+  setText('jack', `💰 ${m.jack} Jack`);
+  setText('labor', `🔨 ${m.labor} ca lao động`);
   // Chỉ dựng lại DOM khi nội dung đổi (dựng lại 15 lần/giây gây giật hình)
   const ik = Object.keys(ITEM_NAMES).map((k) => (m.items[k] ? 1 : 0)).join('');
   if (ik !== itemsKey) {
@@ -801,7 +811,7 @@ $('soundbtn').addEventListener('click', () => { $('soundbtn').textContent = togg
 {
   const sel = $('qual');
   if (sel) {
-    sel.value = quality;
+    sel.value = qualityPref;
     sel.addEventListener('change', () => { try { localStorage.setItem('ditu-quality', sel.value); } catch { /* bỏ qua */ } toast('Đã lưu chất lượng đồ họa. Hãy tải lại trang (F5) để áp dụng.', 'info'); });
   }
 }
@@ -1172,6 +1182,7 @@ const arrows = [];
 for (let i = 0; i < ARROW_N; i++) { const a = new THREE.Mesh(arrowGeo, arrowMat); a.visible = false; a.renderOrder = 2; scene.add(a); arrows.push(a); }
 const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 6, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
 beacon.visible = false; scene.add(beacon);
+const arrowFrom = { x: 0, z: 0 };
 let arrowPath = null, arrowCum = [], arrowTotal = 0, arrowTimer = 0, arrowGoalKey = '';
 const arrowsActive = () => arrowsOn && phasesSeen < PHASES.length && snap && snap.me.goal && !snap.me.goal.free && snap.me.jail <= 0;
 
@@ -1180,8 +1191,10 @@ function updateArrows(dt, time) {
   if (!active) { arrowPath = null; for (const a of arrows) a.visible = false; beacon.visible = false; return; }
   const goal = snap.me.goal;
   arrowTimer -= dt;
-  if (arrowTimer <= 0) {
-    arrowTimer = 0.45;
+  // chỉ tính lại đường (BFS cả lưới) khi mục tiêu đổi, người chơi đi lệch/xa chỗ tính lần trước > 2 m, hoặc mỗi 2 giây
+  const gk = `${goal.x}|${goal.z}`, moved = Math.hypot(me.x - arrowFrom.x, me.z - arrowFrom.z) > 2;
+  if (!arrowPath || gk !== arrowGoalKey || (arrowTimer <= 0 && moved) || arrowTimer <= -1.5) {
+    arrowTimer = 0.45; arrowGoalKey = gk; arrowFrom.x = me.x; arrowFrom.z = me.z;
     arrowPath = findPath(me.x, me.z, goal.x, goal.z, 260);
     arrowCum = [0];
     for (let i = 1; i < arrowPath.length; i++) arrowCum.push(arrowCum[i - 1] + Math.hypot(arrowPath[i][0] - arrowPath[i - 1][0], arrowPath[i][1] - arrowPath[i - 1][1]));
@@ -1330,13 +1343,40 @@ function diagFrame(now, dt) {
     `ping ${netStat.ping} ms${SIM_LAG || SIM_JIT ? `  (giả lập +${SIM_LAG}±${SIM_JIT} ms mỗi chiều)` : ''}\n` +
     `gói snapshot: cách nhau TB ${(gAvg * 1000).toFixed(0)} ms, lớn nhất ${(gMax * 1000).toFixed(0)} ms\n` +
     `sửa vị trí: ${netStat.corr.length} lần / 60 giây   lệch hiển thị ${Math.hypot(visOffX, visOffZ).toFixed(2)} m\n` +
-    `lệnh vẽ ${drawCalls}  tam giác ${(drawTris / 1000).toFixed(0)}k  chất lượng ${quality}  pixelRatio ${pixelRatio}\n` +
+    `lệnh vẽ ${drawCalls}  tam giác ${(drawTris / 1000).toFixed(0)}k  chất lượng ${quality} (${qualityPref}, bậc tự động ${autoStep})  pixelRatio ${pixelRatio}\n` +
     `người/NPC: ${ents.size}  lệnh chờ xác nhận: ${inputHist.length}`;
 }
 // Cho phép kiểm thử tự động đọc số đo
 window.__diag = () => ({ ping: netStat.ping, corr60: netStat.corr.length, visOff: Math.hypot(visOffX, visOffZ), pending: inputHist.length, drawCalls, drawTris, frames: Array.from(frameTimes.subarray(0, Math.min(ftI, 120))), snapGaps: netStat.snapGaps.slice(), x: me.x, z: me.z });
 
 // ===================== Vòng lặp vẽ =====================
+// ----- Tự điều chỉnh chất lượng (C1): có độ trễ để không nhảy qua lại -----
+// Bậc 0 = mức người chơi/thiết bị; 1 tắt bloom; 2 bóng đổ 1024; 3 pixelRatio 1; 4 tắt bóng đổ. Áp dụng ngay, không cần tải lại trang.
+const AUTO_MAX = 4, devPR = Math.min(window.devicePixelRatio || 1, PR_CAP[quality]);
+let autoStep = 0, bloomOn = true, aqAcc = 0, aqN = 0, aqLow = 0, aqHigh = 0, aqUpWait = 10;
+function applyAutoStep(n) {
+  autoStep = n;
+  bloomOn = n < 1;
+  const sz = n >= 2 ? 1024 : SHADOW_SIZE[quality];
+  if (sun.shadow.mapSize.x !== sz) { sun.shadow.mapSize.set(sz, sz); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  sun.castShadow = quality !== 'low' && n < 4;
+  const pr = n >= 3 ? 1 : devPR;
+  if (pr !== pixelRatio) { pixelRatio = pr; renderer.setPixelRatio(pr); resize(); }
+}
+function autoQuality(dt) {
+  if (qualityPref !== 'auto') return;
+  if (document.hidden) { aqAcc = 0; aqN = 0; return; } // tab ẩn: trình duyệt hãm vẽ, số đo vô nghĩa
+  aqAcc += dt; aqN++; // dt bị chặn ở 0,05 s nên máy rất chậm vẫn đo ra ≤ 20 FPS
+  if (aqAcc < 1) return;
+  const fps = aqN / aqAcc; aqAcc = 0; aqN = 0;
+  if (fps < 40) { aqLow++; aqHigh = 0; } else if (fps > 57) { aqHigh++; aqLow = 0; } else { aqLow = 0; aqHigh = 0; }
+  if (aqLow >= 3 && autoStep < AUTO_MAX) { // vừa nâng rồi lại tụt thì chờ lâu hơn mới thử nâng tiếp
+    if (autoStepUpAt && performance.now() - autoStepUpAt < 30000) aqUpWait = Math.min(60, aqUpWait * 2);
+    applyAutoStep(autoStep + 1); aqLow = 0;
+  } else if (aqHigh >= aqUpWait && autoStep > 0) { applyAutoStep(autoStep - 1); autoStepUpAt = performance.now(); aqHigh = 0; }
+}
+let autoStepUpAt = 0;
+
 const camFocus = new THREE.Vector3(0, 0, 0);
 const NIGHT_FOG = new THREE.Color(0x070b18);
 let coneFrame = 0, last = performance.now(), time = 0, nightK = 0, evK = 0, stepT = 0, fpsAcc = 0, fpsN = 0, sneaking = false;
@@ -1348,12 +1388,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now; time += dt;
 
-  // tự giảm độ phân giải nếu máy yếu
-  fpsAcc += dt; fpsN++;
-  if (fpsN >= 90) {
-    if (fpsAcc / fpsN > 0.026 && pixelRatio > 1) { pixelRatio = Math.max(1, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); resize(); }
-    fpsAcc = 0; fpsN = 0;
-  }
+  autoQuality(dt);
 
   let moving = false;
   sneaking = false;
@@ -1430,7 +1465,11 @@ function frame(now) {
     cone.visible = near;
     if (!near) continue;
     cone.position.set(e.x, 0, e.z);
-    if ((coneFrame + cone.id) % 2 === 0) updateCone(cone, e, range);
+    // tính lại các tia chỉ khi quản giáo đã di chuyển/xoay đáng kể hoặc tầm nhìn đổi (tường tĩnh nên kết quả không đổi nếu đứng yên)
+    const cs = cone.userData;
+    if ((coneFrame + cone.id) % 2 === 0 && (cs.rng !== range || Math.abs(cs.x - e.x) > 0.08 || Math.abs(cs.z - e.z) > 0.08 || Math.abs(cs.ry - e.ry) > 0.02)) {
+      updateCone(cone, e, range); cs.x = e.x; cs.z = e.z; cs.ry = e.ry; cs.rng = range;
+    }
     cone.material.color.set(e.alert === 1 ? 0xff5a4a : 0xffe066);
     cone.material.opacity = (e.alert === 1 ? 0.3 : 0.2) + (night ? 0.08 : 0);
   }
@@ -1524,7 +1563,7 @@ function frame(now) {
   sun.target.position.set(fx, 0, fz);
   sun.position.set(fx - Math.cos(arc) * 30, Math.max(10, Math.sin(arc) * 48), fz + 16);
 
-  if (composer) composer.render(); else renderer.render(scene, camera);
+  if (composer && bloomOn) composer.render(); else renderer.render(scene, camera);
   if (joined && time - mmLastDraw >= (mmBig ? 0.066 : 0.1)) { mmLastDraw = time; drawMinimap(time); } // 10 lần/giây là đủ mượt cho bản đồ nhỏ
   diagFrame(now, dt);
 }

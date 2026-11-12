@@ -39,6 +39,7 @@ const mgMin = (kind, params) => {
 const Q = (v) => Math.round(v * 10);
 const QA = (v) => Math.round(v * 20);
 const SNAP_NEAR_R = 40; // mét: trong bán kính này gửi đủ tần suất (rộng hơn tầm nhìn camera để không bị giật)
+const SNAP_MAX_BUFFERED = 64 * 1024; // byte: nếu hàng đợi gửi của một kết nối vượt ngưỡng này thì bỏ qua gói snapshot (N7)
 const SNAP_FAR_EVERY = 5; // ngoài bán kính: cứ 5 gói mới gửi 1 lần (~3 lần/giây)
 const MG_LIMIT = { hilo: 25, timing: 30, keys: 30, aim: 45, wires: 45, sort: 45, memory: 50, pairs: 50, clean: 45, mash: 45, balance: 45, pong: 60, kick: 45, bricks: 60, marbles: 60 };
 const MG_LIMIT_DEFAULT = 60; // minigame mới chưa khai báo vẫn phải có hạn chót
@@ -1138,14 +1139,19 @@ export class Room {
       dig: [Math.round((this.dig.pr / RULES.digTarget) * 100), this.dig.open ? 1 : 0],
     };
     for (const p of this.players.values()) {
+      if (p.ws && p.ws.bufferedAmount > SNAP_MAX_BUFFERED) continue; // kết nối chậm/nghẽn: bỏ gói này, gói sau thay thế được (tránh dồn bộ nhớ)
       const inRange = (e) => farTurn || (e[1] / 10 - p.x) ** 2 + (e[2] / 10 - p.z) ** 2 <= SNAP_NEAR_R * SNAP_NEAR_R;
-      const near = p.near ? { id: p.near.s.id, label: p.near.label, ok: p.near.ok, why: p.near.why || '' } : null;
-      const slow = {
-        items: p.items, near, jk: p.jailKind, jack: p.jack, labor: p.labor,
-        boost: Math.ceil(Math.max(0, p.boost)), rock: Math.ceil(Math.max(0, p.rockCd)),
-        stock: p.stock, buys: p.bombBuys, goal: this.goalFor(p),
-      };
-      const key = JSON.stringify(slow);
+      // phần "ít đổi" (me2) chỉ tính lại 4 lần/giây (goalFor + JSON.stringify khá tốn), các gói còn lại dùng bản cũ
+      if (!p.slowCache || n % 4 === 0) {
+        const near = p.near ? { id: p.near.s.id, label: p.near.label, ok: p.near.ok, why: p.near.why || '' } : null;
+        const sl = {
+          items: p.items, near, jk: p.jailKind, jack: p.jack, labor: p.labor,
+          boost: Math.ceil(Math.max(0, p.boost)), rock: Math.ceil(Math.max(0, p.rockCd)),
+          stock: p.stock, buys: p.bombBuys, goal: this.goalFor(p),
+        };
+        p.slowCache = { slow: sl, key: JSON.stringify(sl) };
+      }
+      const { slow, key } = p.slowCache;
       const out = {
         ...base,
         p: allP.filter((e) => e[0] === p.id || inRange(e)),

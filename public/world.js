@@ -858,6 +858,7 @@ export function makeCharacter(kind, seedStr = '', numLabel = '') {
   for (const sx of [-1, 1]) mesh(gEar(), skin, head, sx * 0.25, 0, 0);
   const face = new THREE.Mesh(G('face', () => new THREE.PlaneGeometry(0.4, 0.3)), new THREE.MeshBasicMaterial({ map: faceTexture(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
   face.position.set(0, 0.0, 0.243); head.add(face);
+  face.userData.own = 'mat'; // vật liệu riêng (texture mặt dùng chung)
 
   if (isGuard) {
     mesh(bx(0.58, 0.14, 0.58), mat(0x1c2b4a), head, 0, 0.23, 0); // mũ
@@ -882,6 +883,7 @@ export function makeCharacter(kind, seedStr = '', numLabel = '') {
     if (numLabel) {
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.23), new THREE.MeshBasicMaterial({ map: numberTexture(numLabel) }));
       plate.position.set(0, 0.4, -0.2); plate.rotation.y = Math.PI; upper.add(plate);
+      plate.userData.own = 'tex'; plate.geometry.userData.own = true; // riêng từng nhân vật: phải giải phóng khi rời đi (C6)
     }
   }
   g.userData = { rig: { hipL, hipR, kneeL, kneeR, shL, shR, elL, elR, upper, head }, cur: Object.create(null), walkT: Math.random() * 6 };

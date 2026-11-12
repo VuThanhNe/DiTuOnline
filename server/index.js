@@ -128,10 +128,15 @@ const lobby = new Lobby({
 const TICK_MS = 1000 / 30;
 const tickStats = { n: 0, sum: 0, max: 0, lagSum: 0, lagMax: 0, last: { tickAvgMs: 0, tickMaxMs: 0, loopLagMs: 0, loopLagMaxMs: 0 } };
 let last = Date.now();
-setInterval(() => {
+// Vòng tự hiệu chỉnh (S1): thời điểm nhịp kế tính theo đồng hồ gốc, nên nhịp trễ thì nhịp sau đến sớm hơn bù lại, không trôi nhịp.
+let nextAt = last + TICK_MS;
+function loop() {
   const now = Date.now();
   const elapsed = now - last;
   last = now;
+  nextAt += TICK_MS;
+  if (nextAt < now - 250) nextAt = now + TICK_MS; // trễ quá nhiều (máy treo): đặt lại mốc thay vì chạy dồn liên tục
+  setTimeout(loop, Math.max(1, nextAt - Date.now()));
   let dt = Math.min(0.25, elapsed / 1000);
   const t0 = process.hrtime.bigint();
   while (dt > 1e-6) {
@@ -143,7 +148,8 @@ setInterval(() => {
   tickStats.n++; tickStats.sum += ms; tickStats.lagSum += lag;
   if (ms > tickStats.max) tickStats.max = ms;
   if (lag > tickStats.lagMax) tickStats.lagMax = lag;
-}, TICK_MS);
+}
+setTimeout(loop, TICK_MS);
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
 const ipCount = new Map();

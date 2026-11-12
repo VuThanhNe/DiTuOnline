@@ -100,6 +100,15 @@ Game giả lập đời sống trại giam, 3D, nhiều người chơi realtime,
 **Công cụ đo:** phím F3 (bảng chẩn đoán), `?lag=&jitter=` (giả lập mạng trễ mỗi chiều), tin nhắn `ping`/`pong`, `window.__diag()`, `/status` có `tickAvgMs/tickMaxMs/loopLagMs/loopLagMaxMs`, log `[nhịp]` mỗi phút.
 **Khác:** tắt máy êm khi nhận SIGTERM (báo người chơi rồi đóng kết nối); `render.yaml` có `region: singapore` (chỉ có tác dụng khi TẠO dịch vụ mới); minimap vẽ 10 lần/giây; `animateCharacter` dùng lại một object tư thế. Kế hoạch còn lại: OPTIMIZE_PLAN.md mục 0.
 
+## Đợt 10: tối ưu tiếp (S1, S2 một phần, N7, C1, C3, C4, C6)
+- **S1:** vòng nhịp server tự hiệu chỉnh (`setTimeout` theo mốc `nextAt`, trễ thì nhịp sau bù, trễ >250 ms thì đặt lại mốc).
+- **N7:** `sendSnapshots` bỏ qua người có `ws.bufferedAmount` > 64 KB (snapshot sau thay thế được).
+- **S2 (một phần):** `goalFor` + `JSON.stringify(slow)` chỉ tính lại 4 lần/giây (`p.slowCache`). Chưa làm `nearStation`/`updateDetection`.
+- **C1:** mức đồ họa "Tự động" (mặc định): FPS < 40 trong 3 giây hạ một bậc (tắt bloom -> bóng 1024 -> pixelRatio 1 -> tắt bóng), FPS > 57 trong 10 giây nâng lại (chờ lâu hơn nếu vừa nâng đã tụt). Áp dụng ngay, không cần tải lại. Chọn mức cố định trong menu thì tắt tự động.
+- **C3:** mũi tên chỉ đường chỉ tính lại BFS khi đổi mục tiêu / lệch >2 m / mỗi ~2 giây. **C4:** hình quạt quản giáo chỉ tính lại tia khi quản giáo di chuyển/xoay; HUD chỉ ghi DOM khi giá trị đổi (`setText`/`setWidth`). **C6:** `removeEntity` giải phóng texture chữ, vật liệu và geometry riêng.
+- Test: patrol, lobby, bots (3 lần), netcode đều đạt; mở game thật không có lỗi console. **Chưa đo FPS/GC thật** vì cửa sổ tự động bị hãm; cần người chơi mở F3 kiểm.
+- Còn lại: M4, N4, N6, S2 (phần còn lại), S3, C2, C5, L2 (cần ffmpeg), L4, R3, R4.
+
 ## Đợt 4: sửa lỗi + mở rộng
 **Bản đồ mở rộng** (`WORLD` -40..64 x -30..48): khu đông có Phòng y tế (khám, giường bệnh hồi máu), Phòng giặt, Vườn rau; dãy nam có Phòng giải trí (bóng bàn, chơi bài, tivi), Phòng gym, Phòng tắm. Sân tập có khung thành, tường gạch, vòng bắn bi (trạm đá bóng, đập gạch, bắn bi, hít đất, kéo xà, tập thể dục). Giặt/vườn là kind `chore` (tính ca lao động); tivi/tắm/khám là kind `rest` (giữ E, hồi máu/sức); `play` là bóng bàn/chơi bài. Mỗi trạm/tuyến tuần tra/điểm mèo phải nằm trên chỗ trống (kiểm tra bằng `blocked`/`distField`).
 **Mèo cathehe:** NPC `kind: 'cat'` (`CAT`, `CAT_SPOTS`), tự đi giữa các điểm bằng `walkGuard`, ngồi nghỉ khi `wait > 0` (cờ snapshot = 2), kêu meo (`NPC_LINES.cat`, sfx `meow`).
