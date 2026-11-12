@@ -1,0 +1,138 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#14171c">
+<title>Đi Tù Online</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">{"imports":{"three":"/vendor/three/three.module.js","three/addons/":"/vendor/three-addons/"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="start" class="overlay">
+  <div class="card">
+    <h1>ĐI TÙ <span>ONLINE</span></h1>
+    <p class="sub">Sống sót trong trại giam: cải tạo hoặc vượt ngục.</p>
+    <input id="name" maxlength="14" placeholder="Nhập tên của bạn" autocomplete="off">
+    <button id="enter">Nhập trại</button>
+    <p class="tip">Cần xem thao tác? Bấm nút ❓ cạnh bản đồ nhỏ khi vào game.</p>
+    <p id="connmsg" class="conn"></p>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="topleft" class="panel">
+    <div id="phase">—</div>
+    <div id="clock"></div>
+    <div id="hint"></div>
+    <div id="goal" class="hidden"></div>
+    <div class="stat"><span>❤️ Máu</span><div class="bar hp"><i id="hpbar"></i></div><em id="hptext"></em></div>
+    <div class="stat"><span>⚡ Sức</span><div class="bar en"><i id="enbar"></i></div><em id="entext"></em></div>
+    <div class="stat"><span>⭐ Điểm</span><div class="bar"><i id="ptsbar"></i></div><em id="ptstext"></em></div>
+    <div id="wallet"><span id="jack">💰 0 Jack</span><span id="labor">🔨 0 ca</span></div>
+    <div id="items"></div>
+    <div id="stock"></div>
+    <div id="digrow" class="dim"></div>
+  </div>
+  <div id="topright" class="panel">
+    <div class="ttl">Bảng xếp hạng <span id="online"></span></div>
+    <ol id="lb"></ol>
+  </div>
+  <div id="daydial" class="panel">
+    <canvas id="dialc" width="168" height="168"></canvas>
+    <div class="dialtxt"><b id="dialstate">☀️ BAN NGÀY</b><span id="dialphase"></span></div>
+  </div>
+  <div id="phasebanner"><span class="pi"></span><div><b class="pn"></b><small class="ph"></small></div></div>
+  <button id="soundbtn" title="Bật/tắt âm thanh (M)">🔊</button>
+  <input id="vol" type="range" min="0" max="100" title="Âm lượng">
+  <canvas id="minimap" width="400" height="300" title="Nhấn N hoặc bấm để phóng to"></canvas>
+  <button id="helpbtn" title="Hướng dẫn (K)">❓</button>
+  <div id="detect" class="hidden"><span>BỊ PHÁT HIỆN</span><i></i></div>
+  <div id="toasts"></div>
+  <div id="prompt" class="hidden"><div id="prtext"></div><div class="bar"><i id="holdbar"></i></div></div>
+  <div id="chat">
+    <div id="chatlog"></div>
+    <input id="chatin" maxlength="80" placeholder="Nhấn Enter để chat..." autocomplete="off">
+  </div>
+  <div id="banner" class="hidden"></div>
+  <div id="jail" class="hidden"><b id="jailttl">BIỆT GIAM</b><span id="jailsecs"></span><small id="jailhint"></small></div>
+  <div id="touch" class="hidden">
+    <div id="joy"><i id="knob"></i></div>
+    <button id="actbtn">E</button>
+    <button id="bombbtn">💣</button>
+    <button id="drinkbtn">🥤</button>
+    <button id="rockbtn">🪨</button>
+    <button id="runbtn">🏃</button>
+    <button id="sneakbtn">🤫</button>
+    <button id="chatbtn">💬</button>
+  </div>
+</div>
+
+<div id="mg" class="hidden">
+  <div class="mgbox">
+    <div id="mgtitle"></div>
+    <canvas id="mgc"></canvas>
+    <div id="mghint"></div>
+    <div id="mgpad"></div>
+  </div>
+</div>
+
+<div id="settings" class="hidden">
+  <div class="helpbox">
+    <div class="shophead"><b>CÀI ĐẶT</b><button id="helpclose2">✕</button></div>
+    <div class="setgrid">
+      <label for="setvol">Âm lượng</label><input id="setvol" type="range" min="0" max="100">
+      <label for="camsel">Góc nhìn</label>
+      <select id="camsel">
+        <option value="top">Trên cao cố định (mặc định)</option>
+        <option value="third">Ngôi thứ ba, xoay được (kiểu Roblox)</option>
+      </select>
+      <label for="qual">Đồ họa</label>
+      <select id="qual"><option value="low">Thấp (nhẹ nhất)</option><option value="mid">Vừa</option><option value="high">Cao (bloom, bóng đẹp)</option></select>
+    </div>
+    <p class="helpnote" id="camnote"></p>
+    <p class="helpnote">Đồ họa chỉ áp dụng sau khi tải lại trang (F5).</p>
+    <div class="setbtns"><button id="setguide">📖 Hướng dẫn</button><button id="setresume" class="primary">Tiếp tục chơi</button></div>
+  </div>
+</div>
+
+<div id="help" class="hidden">
+  <div class="helpbox">
+    <div class="shophead"><b>HƯỚNG DẪN</b><button id="helpclose">✕</button></div>
+    <div class="helpgrid">
+      <div><kbd>W A S D</kbd></div><div>Di chuyển</div>
+      <div><kbd>Shift</kbd> (giữ)</div><div>Chạy (nhanh hơn nhưng tốn năng lượng và gây tiếng động)</div>
+      <div><kbd>C</kbd> (giữ)</div><div>Đi lén (chậm, khó bị phát hiện)</div>
+      <div><kbd>Esc</kbd></div><div>Menu cài đặt: âm lượng, góc nhìn, đồ họa, hướng dẫn</div>
+      <div><kbd>E</kbd></div><div>Tương tác: làm việc, ăn, nhặt đồ, đào, chơi minigame</div>
+      <div><kbd>Q</kbd> (giữ)</div><div>Ngắm ném bom: giữ Q, chuột chỉ hướng, thả Q để ném (Esc huỷ)</div>
+      <div><kbd>R</kbd></div><div>Uống Reddog</div>
+      <div><kbd>T</kbd> (giữ)</div><div>Ngắm ném đá dụ quản giáo: giữ T, thả T để ném</div>
+      <div><kbd>G</kbd></div><div>Tặng Jack người bên cạnh</div>
+      <div><kbd>Enter</kbd></div><div>Chat</div>
+      <div><kbd>N</kbd></div><div>Bản đồ lớn</div>
+      <div><kbd>H</kbd></div><div>Bật/tắt mũi tên chỉ đường</div>
+      <div><kbd>M</kbd></div><div>Bật/tắt âm thanh</div>
+      <div><kbd>K</kbd></div><div>Mở/đóng hướng dẫn</div>
+      <div>Cuộn chuột</div><div>Phóng to/thu nhỏ</div>
+      <div>Kéo chuột</div><div>Xoay camera (khi chọn góc nhìn ngôi thứ ba)</div>
+    </div>
+    <p class="helpnote">Đủ 300 điểm thì ra <b>Cổng trại</b> (tường phía đông) giữ E để mãn hạn. Bỏ điểm danh, bỏ bữa, trốn lao động sẽ bị cảnh cáo: 3 cảnh cáo là bị quản giáo để mắt.</p>
+    <p class="helpnote">Điện thoại: joystick bên trái, các nút bên phải (E, 💣, 🥤, 🪨, 🏃 chạy, 🤫 đi lén, 💬 chat). Ở góc nhìn ngôi thứ ba, kéo ngón tay lên màn hình để xoay camera. Nút 💣 và 🪨: giữ để ngắm bằng joystick, nhả ra để ném.</p>
+    <p class="helpnote">Có chú mèo cathehe đi dạo quanh trại, thử tìm xem nó đang ở đâu nhé! Biệt giam phải chờ hết án, không rút ngắn được.</p>
+    <p class="helpnote">Đủ 300 điểm là mãn hạn tù. Muốn vượt ngục thì chuẩn bị đồ rồi hành động lúc tắt đèn.</p>
+  </div>
+</div>
+
+<div id="shop" class="hidden">
+  <div class="shopbox">
+    <div class="shophead"><div><b>CHỢ ĐEN</b> · Tày Scam<div class="sub2">Đơn vị: Jack · có thể bị lừa</div></div><button id="shopclose">✕</button></div>
+    <div id="shopjack"></div>
+    <div id="shoplist"></div>
+  </div>
+</div>
+<script type="module" src="/client.js"></script>
+</body>
+</html>

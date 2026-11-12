@@ -1,0 +1,20 @@
+{
+  "name": "di-tu-online",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Game giả lập đi tù 3D nhiều người chơi realtime chạy trên trình duyệt",
+  "scripts": {
+    "start": "node server/index.js",
+    "test:patrol": "node server/test-patrol.js",
+    "test:bots": "node server/test-bots.js",
+    "test:bandwidth": "node server/test-bandwidth.js"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
